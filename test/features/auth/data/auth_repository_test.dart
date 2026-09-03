@@ -101,11 +101,12 @@ void main() {
       },
     );
 
-    await ApiAuthRepository(client).register(registration);
+    final inviteCode = await ApiAuthRepository(client).register(registration);
 
     expect(request.method, 'POST');
     expect(request.path, '/api/v1/auth/register');
     expect(request.data, registration.toJson());
+    expect(inviteCode, isNull);
   });
 
   test('새 길드 생성 API에는 생성 모드와 길드명만 전송한다', () async {
@@ -121,6 +122,7 @@ void main() {
               'userId': 10,
               'guildId': 4,
               'role': 'MASTER',
+              'inviteCode': 'A1B2C3',
             },
           },
         ),
@@ -140,12 +142,13 @@ void main() {
       skills: <String, dynamic>{},
     );
 
-    await ApiAuthRepository(client).register(registration);
+    final inviteCode = await ApiAuthRepository(client).register(registration);
 
     expect(request.path, '/api/v1/auth/register');
     expect(request.data, containsPair('mode', 'CREATE_GUILD'));
     expect(request.data, containsPair('guild_name', '새 길드'));
     expect((request.data as Map<String, dynamic>).containsKey('code'), isFalse);
+    expect(inviteCode, 'A1B2C3');
   });
 
   test('v1 길드 설정 envelope에서 전투력 수정 정책을 읽는다', () async {
@@ -169,6 +172,22 @@ void main() {
     final settings = await ApiAuthRepository(client).fetchProfileSettings();
 
     expect(settings.allowCombatPowerEdit, isFalse);
+  });
+
+  test('회원 탈퇴 API에 현재 비밀번호를 담아 DELETE 요청한다', () async {
+    late RequestOptions request;
+    final client = _client((options, handler) {
+      request = options;
+      handler.resolve(
+        Response<Object?>(requestOptions: options, statusCode: 204),
+      );
+    });
+
+    await ApiAuthRepository(client).deleteMe(password: 'current-password');
+
+    expect(request.method, 'DELETE');
+    expect(request.path, '/api/users/me');
+    expect(request.data, <String, String>{'password': 'current-password'});
   });
 }
 

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "881287795729",
+    "project_id": "hanul-on",
+    "storage_bucket": "hanul-on.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:881287795729:android:b0b62816ac7a177eae0db0",
+        "android_client_info": {
+          "package_name": "com.odinguild.odin_guild_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAKBgc40VMhhOkGKTbrVH0vpgCGWfFgIiU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

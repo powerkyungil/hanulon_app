@@ -1,8 +1,52 @@
+import java.io.FileInputStream
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
+    id("com.google.gms.google-services")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
+}
+
+val keystoreProperties = Properties()
+val keystorePropertiesFile = rootProject.file("key.properties")
+val isReleaseBuild = gradle.startParameter.taskNames.any {
+    it.contains("release", ignoreCase = true)
+}
+
+if (keystorePropertiesFile.exists()) {
+    FileInputStream(keystorePropertiesFile).use(keystoreProperties::load)
+}
+
+fun signingValue(propertyName: String, environmentName: String): String? {
+    return keystoreProperties.getProperty(propertyName)?.takeIf(String::isNotBlank)
+        ?: System.getenv(environmentName)?.takeIf(String::isNotBlank)
+}
+
+val releaseKeyAlias = signingValue("keyAlias", "ANDROID_UPLOAD_KEY_ALIAS")
+val releaseKeyPassword = signingValue(
+    "keyPassword",
+    "ANDROID_UPLOAD_KEY_PASSWORD",
+)
+val releaseStorePassword = signingValue(
+    "storePassword",
+    "ANDROID_UPLOAD_STORE_PASSWORD",
+)
+val releaseStoreFilePath = signingValue(
+    "storeFile",
+    "ANDROID_UPLOAD_STORE_FILE",
+)
+val releaseStoreFile = releaseStoreFilePath?.let(rootProject::file)
+val hasReleaseSigning = releaseKeyAlias != null &&
+    releaseKeyPassword != null &&
+    releaseStorePassword != null &&
+    releaseStoreFile?.isFile == true
+
+if (isReleaseBuild && !hasReleaseSigning) {
+    throw GradleException(
+        "배포용 업로드 키 설정이 없습니다. docs/release-deployment.md를 확인해 주세요.",
+    )
 }
 
 android {
@@ -21,7 +65,6 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "com.odinguild.odin_guild_app"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
@@ -32,11 +75,22 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+                storeFile = releaseStoreFile
+                storePassword = releaseStorePassword
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 }

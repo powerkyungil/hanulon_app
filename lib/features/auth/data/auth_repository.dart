@@ -19,9 +19,11 @@ abstract interface class AuthRepository {
 
   Future<ProfileSettings> fetchProfileSettings();
 
-  Future<void> register(RegistrationRequest request);
+  Future<String?> register(RegistrationRequest request);
 
   Future<void> updateMe(ProfileUpdateRequest request);
+
+  Future<void> deleteMe({required String password});
 }
 
 class ApiAuthRepository implements AuthRepository {
@@ -91,11 +93,15 @@ class ApiAuthRepository implements AuthRepository {
   }
 
   @override
-  Future<void> register(RegistrationRequest request) {
-    return _apiClient.post<void>(
+  Future<String?> register(RegistrationRequest request) {
+    return _apiClient.post<String?>(
       ApiPaths.register,
       data: request.toJson(),
-      decode: (_) {},
+      decode: (data) {
+        final json = _payloadJson(data);
+        final inviteCode = json['inviteCode']?.toString().trim() ?? '';
+        return inviteCode.isEmpty ? null : inviteCode;
+      },
     );
   }
 
@@ -104,6 +110,15 @@ class ApiAuthRepository implements AuthRepository {
     return _apiClient.put<void>(
       ApiPaths.me,
       data: request.toJson(),
+      decode: (_) {},
+    );
+  }
+
+  @override
+  Future<void> deleteMe({required String password}) {
+    return _apiClient.delete<void>(
+      ApiPaths.me,
+      data: <String, String>{'password': password},
       decode: (_) {},
     );
   }

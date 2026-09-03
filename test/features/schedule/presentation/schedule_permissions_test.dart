@@ -6,6 +6,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:odin_guild_app/app/theme/app_theme.dart';
 import 'package:odin_guild_app/core/time/server_clock.dart';
+import 'package:odin_guild_app/core/widgets/app_hero_card.dart';
+import 'package:odin_guild_app/core/widgets/status_tag.dart';
 import 'package:odin_guild_app/features/auth/application/auth_controller.dart';
 import 'package:odin_guild_app/features/auth/domain/session.dart';
 import 'package:odin_guild_app/features/auth/domain/user_role.dart';
@@ -34,6 +36,71 @@ void main() {
     expect(find.text('멍'), findsOneWidget);
     expect(find.byTooltip('삭제'), findsOneWidget);
     expect(find.byTooltip('일정 관리'), findsNothing);
+  });
+
+  testWidgets('다음 일정은 NEXT로 강조하고 진입 시 해당 위치로 이동한다', (tester) async {
+    final repository = _FakeScheduleRepository(includeFuture: true);
+    await tester.pumpWidget(
+      _buildApp(const ScheduleScreen(), repository: repository),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('NEXT'), findsOneWidget);
+    final verticalScrollable = find.descendant(
+      of: find.byType(CustomScrollView),
+      matching: find.byType(Scrollable),
+    );
+    final scrollableState = tester.state<ScrollableState>(verticalScrollable);
+    expect(scrollableState.position.pixels, greaterThan(0));
+  });
+
+  testWidgets('NEXT 아이콘은 가장 왼쪽에 두고 유형 배지와 색상을 유지한다', (tester) async {
+    final repository = _FakeScheduleRepository(includeFuture: true);
+    await tester.pumpWidget(
+      _buildApp(const ScheduleScreen(), repository: repository),
+    );
+    await tester.pumpAndSettle();
+
+    final now = _FixedServerClock._now.millisecondsSinceEpoch;
+    final regularVoteKey =
+        '본섭|요툰하임|파르바|${now - const Duration(minutes: 10).inMilliseconds}';
+    final nextVoteKey =
+        '침공|니플하임|다음 보스|${now + const Duration(minutes: 10).inMilliseconds}';
+    final followingVoteKey =
+        '침공|니플하임|그 다음 보스|${now + const Duration(minutes: 20).inMilliseconds}';
+
+    final regularBadge = tester.getRect(
+      find.byKey(ValueKey<String>('schedule-type-$regularVoteKey')),
+    );
+    final regularBoss = tester.getRect(
+      find.byKey(ValueKey<String>('schedule-boss-$regularVoteKey')),
+    );
+    expect(regularBadge.left, closeTo(regularBoss.left, 0.1));
+
+    final nextIcon = tester.getRect(
+      find.byKey(ValueKey<String>('schedule-next-icon-$nextVoteKey')),
+    );
+    final nextBadgeRect = tester.getRect(
+      find.byKey(ValueKey<String>('schedule-type-$nextVoteKey')),
+    );
+    final nextBoss = tester.getRect(
+      find.byKey(ValueKey<String>('schedule-boss-$nextVoteKey')),
+    );
+    expect(nextIcon.left, closeTo(nextBoss.left, 0.1));
+    expect(nextBadgeRect.left, greaterThan(nextIcon.right));
+
+    final heroCard = tester.getRect(find.byType(AppHeroCard));
+    final nextLabel = tester.getRect(find.text('NEXT'));
+    expect(nextLabel.center.dx, greaterThan(heroCard.center.dx));
+
+    final nextBadge = tester.widget<StatusTag>(
+      find.byKey(ValueKey<String>('schedule-type-$nextVoteKey')),
+    );
+    final followingBadge = tester.widget<StatusTag>(
+      find.byKey(ValueKey<String>('schedule-type-$followingVoteKey')),
+    );
+    expect(nextBadge.foregroundColor, followingBadge.foregroundColor);
+    expect(nextBadge.backgroundColor, followingBadge.backgroundColor);
   });
 
   testWidgets('일반 길드원의 일정 입력 화면에서 운영 설정은 숨긴다', (tester) async {
@@ -140,38 +207,75 @@ class _FixedServerClock extends ServerClock {
 }
 
 class _FakeScheduleRepository implements ScheduleRepository {
-  _FakeScheduleRepository({List<BossDefinition>? definitions})
-    : definitions =
-          definitions ??
-          const <BossDefinition>[
-            BossDefinition(
-              id: 1,
-              type: '본섭',
-              region: '요툰하임',
-              boss: '파르바',
-              cooldownHours: 12,
-            ),
-          ];
+  _FakeScheduleRepository({
+    List<BossDefinition>? definitions,
+    this.includeFuture = false,
+  }) : definitions =
+           definitions ??
+           const <BossDefinition>[
+             BossDefinition(
+               id: 1,
+               type: '본섭',
+               region: '요툰하임',
+               boss: '파르바',
+               cooldownHours: 12,
+             ),
+           ];
 
   final List<BossDefinition> definitions;
+  final bool includeFuture;
   final List<BossSchedule> createdSchedules = <BossSchedule>[];
 
   static final _now = _FixedServerClock._now.millisecondsSinceEpoch;
 
   @override
   Future<ScheduleOverview> fetchOverview() async {
-    return ScheduleOverview(
-      schedules: <BossSchedule>[
+    final schedules = <BossSchedule>[
+      BossSchedule(
+        id: 1,
+        bossDefinitionId: 1,
+        type: '본섭',
+        region: '요툰하임',
+        boss: '파르바',
+        spawnTime: _now - const Duration(minutes: 10).inMilliseconds,
+        isMung: false,
+      ),
+    ];
+    if (includeFuture) {
+      schedules.addAll(<BossSchedule>[
+        for (var index = 0; index < 4; index++)
+          BossSchedule(
+            id: index + 2,
+            bossDefinitionId: index + 2,
+            type: '공통',
+            region: '던전',
+            boss: '지난 보스 ${index + 1}',
+            spawnTime:
+                _now - const Duration(minutes: 20).inMilliseconds * (index + 1),
+            isMung: false,
+          ),
         BossSchedule(
-          id: 1,
-          bossDefinitionId: 1,
-          type: '본섭',
-          region: '요툰하임',
-          boss: '파르바',
-          spawnTime: _now - const Duration(minutes: 10).inMilliseconds,
+          id: 10,
+          bossDefinitionId: 10,
+          type: '침공',
+          region: '니플하임',
+          boss: '다음 보스',
+          spawnTime: _now + const Duration(minutes: 10).inMilliseconds,
           isMung: false,
         ),
-      ],
+        BossSchedule(
+          id: 11,
+          bossDefinitionId: 11,
+          type: '침공',
+          region: '니플하임',
+          boss: '그 다음 보스',
+          spawnTime: _now + const Duration(minutes: 20).inMilliseconds,
+          isMung: false,
+        ),
+      ]);
+    }
+    return ScheduleOverview(
+      schedules: schedules,
       participationTargetBossDefinitionIds: const <int>{},
       participantsByVoteKey: const <String, List<String>>{},
       closedVoteKeys: const <String>{},

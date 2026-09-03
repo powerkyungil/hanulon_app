@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../../app/theme/app_spacing.dart';
@@ -50,6 +51,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   String? _errorMessage;
   bool _isLoading = true;
   bool _isSaving = false;
+  bool _isDeleting = false;
 
   @override
   void initState() {
@@ -227,6 +229,31 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     }
   }
 
+  Future<void> _deleteAccount() async {
+    if (_isSaving || _isDeleting) return;
+
+    final password = await _showDeleteAccountDialog(context);
+    if (password == null || !mounted) return;
+
+    FocusScope.of(context).unfocus();
+    setState(() {
+      _isDeleting = true;
+      _errorMessage = null;
+    });
+
+    try {
+      await ref
+          .read(authControllerProvider.notifier)
+          .deleteAccount(password: password);
+      if (mounted) context.go('/login');
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _errorMessage = _messageFor(error));
+    } finally {
+      if (mounted) setState(() => _isDeleting = false);
+    }
+  }
+
   String _messageFor(Object error) {
     if (error is ApiException) return error.message;
     return '내 정보를 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.';
@@ -275,7 +302,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 AppSpacing.space3,
               ),
               child: FilledButton(
-                onPressed: _isSaving ? null : _save,
+                onPressed: _isSaving || _isDeleting ? null : _save,
                 child: _isSaving
                     ? const SizedBox.square(
                         dimension: 20,
@@ -545,6 +572,11 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             onTabChanged: (value) => setState(() => _skillTab = value),
             onChanged: () => setState(() {}),
           ),
+          const SizedBox(height: AppSpacing.space6),
+          _AccountDeletionCard(
+            isDeleting: _isDeleting,
+            onDelete: _deleteAccount,
+          ),
           if (_errorMessage != null) ...<Widget>[
             const SizedBox(height: AppSpacing.space4),
             AppCard(
@@ -565,6 +597,128 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               ),
             ),
           ],
+        ],
+      ),
+    );
+  }
+}
+
+Future<String?> _showDeleteAccountDialog(BuildContext context) async {
+  var password = '';
+  var acknowledged = false;
+
+  return showDialog<String>(
+    context: context,
+    barrierDismissible: false,
+    builder: (dialogContext) {
+      return StatefulBuilder(
+        builder: (context, setDialogState) {
+          final canDelete = password.isNotEmpty && acknowledged;
+          return AlertDialog(
+            title: const Text('회원 탈퇴'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  const Text('계정과 개인 캐릭터·활동 데이터가 서버에서 영구 삭제되며 복구할 수 없습니다.'),
+                  const SizedBox(height: AppSpacing.space4),
+                  TextField(
+                    key: const ValueKey<String>('account-delete-password'),
+                    obscureText: true,
+                    autofillHints: const <String>[AutofillHints.password],
+                    textInputAction: TextInputAction.done,
+                    decoration: const InputDecoration(
+                      labelText: '현재 비밀번호',
+                      hintText: '본인 확인을 위해 입력해 주세요',
+                    ),
+                    onChanged: (value) {
+                      setDialogState(() => password = value);
+                    },
+                  ),
+                  const SizedBox(height: AppSpacing.space3),
+                  CheckboxListTile(
+                    key: const ValueKey<String>('account-delete-acknowledge'),
+                    contentPadding: EdgeInsets.zero,
+                    controlAffinity: ListTileControlAffinity.leading,
+                    value: acknowledged,
+                    title: const Text('모든 개인 데이터가 영구 삭제되는 것에 동의합니다.'),
+                    onChanged: (value) {
+                      setDialogState(() => acknowledged = value ?? false);
+                    },
+                  ),
+                ],
+              ),
+            ),
+            actions: <Widget>[
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text('취소'),
+              ),
+              FilledButton(
+                key: const ValueKey<String>('account-delete-confirm'),
+                onPressed: canDelete
+                    ? () => Navigator.of(dialogContext).pop(password)
+                    : null,
+                style: FilledButton.styleFrom(
+                  backgroundColor: context.appPalette.danger,
+                  foregroundColor: Colors.white,
+                ),
+                child: const Text('영구 삭제'),
+              ),
+            ],
+          );
+        },
+      );
+    },
+  );
+}
+
+class _AccountDeletionCard extends StatelessWidget {
+  const _AccountDeletionCard({
+    required this.isDeleting,
+    required this.onDelete,
+  });
+
+  final bool isDeleting;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.appPalette;
+    return AppCard(
+      borderColor: palette.danger.withValues(alpha: 0.35),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Icon(Icons.person_off_outlined, color: palette.danger),
+              const SizedBox(width: AppSpacing.space2),
+              Text('계정 관리', style: AppTextStyles.cardTitle),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.space2),
+          Text(
+            '탈퇴하면 계정과 개인 데이터가 즉시 영구 삭제되며 되돌릴 수 없습니다.',
+            style: AppTextStyles.caption,
+          ),
+          const SizedBox(height: AppSpacing.space4),
+          OutlinedButton.icon(
+            key: const ValueKey<String>('account-delete-button'),
+            onPressed: isDeleting ? null : onDelete,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: palette.danger,
+              side: BorderSide(color: palette.danger),
+            ),
+            icon: isDeleting
+                ? const SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.delete_forever_outlined),
+            label: Text(isDeleting ? '탈퇴 처리 중' : '회원 탈퇴'),
+          ),
         ],
       ),
     );

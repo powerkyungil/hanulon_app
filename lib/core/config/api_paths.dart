@@ -1,6 +1,7 @@
 abstract final class ApiPaths {
   static const login = '/api/v1/auth/login';
   static const register = '/api/v1/auth/register';
+  static const pushTokens = '/api/v1/push-tokens';
   static const me = '/api/users/me';
   static const users = '/api/users';
   static const members = '/api/v1/members';

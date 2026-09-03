@@ -12,6 +12,7 @@ import '../../../core/network/api_exception.dart';
 import '../../../core/widgets/app_button.dart';
 import '../../../core/widgets/app_card.dart';
 import '../../../core/widgets/app_text_field.dart';
+import '../../../core/widgets/privacy_policy_button.dart';
 import '../application/auth_controller.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
@@ -236,6 +237,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                     ),
                                     label: const Text('처음이신가요? 회원가입'),
                                   ),
+                                  const PrivacyPolicyButton(),
                                 ],
                               ),
                             ),

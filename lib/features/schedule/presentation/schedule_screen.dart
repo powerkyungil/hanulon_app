@@ -6,14 +6,17 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../../app/theme/app_radii.dart';
 import '../../../app/theme/app_spacing.dart';
 import '../../../app/theme/app_text_styles.dart';
 import '../../../app/theme/app_theme_palette.dart';
 import '../../../core/network/api_exception.dart';
+import '../../../core/notifications/boss_schedule_voice.dart';
 import '../../../core/permissions/role_guard.dart';
 import '../../../core/time/seoul_datetime.dart';
 import '../../../core/time/server_clock.dart';
 import '../../../core/widgets/app_card.dart';
+import '../../../core/widgets/app_hero_card.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../../../core/widgets/empty_view.dart';
 import '../../../core/widgets/error_view.dart';
@@ -26,7 +29,14 @@ import '../domain/boss_schedule.dart';
 import '../domain/schedule_overview.dart';
 
 class ScheduleScreen extends ConsumerStatefulWidget {
-  const ScheduleScreen({super.key});
+  const ScheduleScreen({
+    this.targetBossDefinitionId,
+    this.targetSpawnTime,
+    super.key,
+  });
+
+  final int? targetBossDefinitionId;
+  final int? targetSpawnTime;
 
   @override
   ConsumerState<ScheduleScreen> createState() => _ScheduleScreenState();
@@ -36,21 +46,29 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen>
     with WidgetsBindingObserver {
   static const _types = <String>['공통', '본섭', '침공', '고정'];
   static const _compactKey = 'boss_schedule_compact_view';
-  static const _voiceKey = 'boss_schedule_voice_enabled';
 
   final Set<String> _selectedTypes = _types.toSet();
   final Set<String> _playedVoiceKeys = <String>{};
   final Set<String> _sentPushKeys = <String>{};
+  final ScrollController _scrollController = ScrollController();
+  final GlobalKey _focusScheduleKey = GlobalKey();
   Timer? _countdownTimer;
   Timer? _pollingTimer;
   bool _compactView = false;
   bool _voiceEnabled = true;
+  bool _focusScrollScheduled = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     unawaited(ref.read(scheduleAlertServiceProvider).initialize());
+    if (widget.targetBossDefinitionId != null &&
+        widget.targetSpawnTime != null) {
+      Future<void>.microtask(
+        ref.read(scheduleControllerProvider.notifier).refresh,
+      );
+    }
     _loadPreferences();
     _startTimers();
   }
@@ -60,7 +78,8 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen>
     if (!mounted) return;
     setState(() {
       _compactView = preferences.getBool(_compactKey) ?? false;
-      _voiceEnabled = preferences.getBool(_voiceKey) ?? true;
+      _voiceEnabled =
+          preferences.getBool(bossScheduleVoiceEnabledStorageKey) ?? true;
     });
   }
 
@@ -87,16 +106,29 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen>
         if (remainingSeconds > target || remainingSeconds <= target - 3) {
           continue;
         }
-        final key = '${schedule.voteKey}|$target';
-        final message = target == 0
-            ? '${schedule.type} ${schedule.boss} 타임입니다.'
-            : '${schedule.type} ${schedule.boss} ${target ~/ 60}분 전입니다.';
+        final bossDefinitionId = schedule.bossDefinitionId;
+        if (bossDefinitionId == null) continue;
+        final key = '$bossDefinitionId:${schedule.spawnTime}:$target';
+        final message = bossScheduleVoiceMessage(
+          bossType: schedule.type,
+          boss: schedule.boss,
+          leadSeconds: target,
+        );
 
         if (_sentPushKeys.add(key)) {
           unawaited(
             ref
                 .read(scheduleAlertServiceProvider)
-                .showPushAlert(notificationKey: key, message: message),
+                .showPushAlert(
+                  bossDefinitionId: bossDefinitionId,
+                  scheduleId: schedule.id,
+                  bossType: schedule.type,
+                  region: schedule.region,
+                  boss: schedule.boss,
+                  spawnTime: schedule.spawnTime,
+                  leadSeconds: target,
+                  message: message,
+                ),
           );
         }
 
@@ -126,6 +158,7 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _stopTimers();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -203,7 +236,7 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen>
     final enabled = !_voiceEnabled;
     setState(() => _voiceEnabled = enabled);
     final preferences = await SharedPreferences.getInstance();
-    await preferences.setBool(_voiceKey, enabled);
+    await preferences.setBool(bossScheduleVoiceEnabledStorageKey, enabled);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('음성 알림을 ${enabled ? '켰습니다.' : '껐습니다.'}')),
@@ -233,14 +266,17 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen>
     final nextSchedule = schedules
         .where((item) => item.spawnTime > now)
         .firstOrNull;
+    final focusSchedule = _focusSchedule(schedules, nextSchedule);
     final counts = <String, int>{
       for (final type in _types)
         type: allSchedules.where((item) => item.type == type).length,
     };
+    _scheduleFocusScroll(focusSchedule);
 
     return RefreshIndicator(
       onRefresh: ref.read(scheduleControllerProvider.notifier).refresh,
       child: CustomScrollView(
+        controller: _scrollController,
         physics: const AlwaysScrollableScrollPhysics(),
         slivers: <Widget>[
           SliverToBoxAdapter(
@@ -395,13 +431,15 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen>
                 AppSpacing.screenHorizontal,
                 AppSpacing.space3,
               ),
-              sliver: SliverList(
-                delegate: SliverChildListDelegate(
-                  _buildRows(
+              sliver: SliverToBoxAdapter(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: _buildRows(
                     schedules,
                     overview,
                     now: now,
                     nextSchedule: nextSchedule,
+                    focusSchedule: focusSchedule,
                     nickname: nickname,
                     canOperateSchedules: canOperateSchedules,
                   ),
@@ -435,11 +473,50 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen>
       ..sort((a, b) => a.spawnTime.compareTo(b.spawnTime));
   }
 
+  BossSchedule? _focusSchedule(
+    List<BossSchedule> schedules,
+    BossSchedule? nextSchedule,
+  ) {
+    final targetBossDefinitionId = widget.targetBossDefinitionId;
+    final targetSpawnTime = widget.targetSpawnTime;
+    if (targetBossDefinitionId != null && targetSpawnTime != null) {
+      for (final schedule in schedules) {
+        if (schedule.bossDefinitionId == targetBossDefinitionId &&
+            schedule.spawnTime == targetSpawnTime) {
+          return schedule;
+        }
+      }
+    }
+    return nextSchedule;
+  }
+
+  void _scheduleFocusScroll(BossSchedule? focusSchedule) {
+    if (focusSchedule == null || _focusScrollScheduled) return;
+    _focusScrollScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final focusContext = _focusScheduleKey.currentContext;
+      if (focusContext == null) {
+        _focusScrollScheduled = false;
+        return;
+      }
+      unawaited(
+        Scrollable.ensureVisible(
+          focusContext,
+          alignment: 0.08,
+          duration: const Duration(milliseconds: 500),
+          curve: Curves.easeOutCubic,
+        ),
+      );
+    });
+  }
+
   List<Widget> _buildRows(
     List<BossSchedule> schedules,
     ScheduleOverview overview, {
     required int now,
     required BossSchedule? nextSchedule,
+    required BossSchedule? focusSchedule,
     required String nickname,
     required bool canOperateSchedules,
   }) {
@@ -462,6 +539,7 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen>
       }
       rows.add(
         _ScheduleCard(
+          key: identical(schedule, focusSchedule) ? _focusScheduleKey : null,
           schedule: schedule,
           overview: overview,
           nickname: nickname,
@@ -731,6 +809,7 @@ class _ScheduleCard extends StatelessWidget {
     required this.onCut,
     required this.onMung,
     required this.onDelete,
+    super.key,
   });
 
   final BossSchedule schedule;
@@ -759,130 +838,324 @@ class _ScheduleCard extends StatelessWidget {
     final colors = _tagColors(context, schedule.type);
     final remaining = schedule.spawnTime - now;
 
+    final content = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        if (emphasized)
+          _buildNextHeader(scheme, palette, colors)
+        else
+          _buildRegularHeader(scheme, palette, colors, isPast),
+        SizedBox(
+          height: emphasized
+              ? AppSpacing.space6
+              : compact
+              ? AppSpacing.space2
+              : AppSpacing.space3,
+        ),
+        if (emphasized)
+          _buildNextDetails(scheme, palette, remaining)
+        else
+          _buildRegularDetails(scheme, palette, isPast, remaining),
+        if (!compact && (isTarget || canOperateSchedules)) ...<Widget>[
+          const SizedBox(height: AppSpacing.space3),
+          Wrap(
+            spacing: AppSpacing.space2,
+            runSpacing: AppSpacing.space2,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: <Widget>[
+              if (isTarget && joined)
+                _SmallAction(
+                  label: '참여목록 ${participants.length}',
+                  icon: Icons.groups_2_outlined,
+                  onPressed: onParticipants,
+                )
+              else if (isTarget && !closed)
+                _SmallAction(
+                  label: '참여',
+                  icon: Icons.check_circle_outline_rounded,
+                  highlighted: true,
+                  onPressed: onParticipate,
+                )
+              else if (isTarget)
+                Text('참여마감', style: AppTextStyles.caption),
+              if (canOperateSchedules && !schedule.isFixed)
+                _SmallAction(
+                  label: schedule.type == '침공' ? '종료' : '컷',
+                  icon: Icons.done_rounded,
+                  onPressed: onCut,
+                ),
+              if (canOperateSchedules &&
+                  isPast &&
+                  schedule.type != '침공' &&
+                  !schedule.isFixed)
+                _SmallAction(
+                  label: '멍',
+                  icon: Icons.refresh_rounded,
+                  onPressed: onMung,
+                ),
+              if (canOperateSchedules && schedule.id != null)
+                IconButton(
+                  visualDensity: VisualDensity.compact,
+                  tooltip: '삭제',
+                  onPressed: onDelete,
+                  icon: const Icon(Icons.close_rounded, size: 18),
+                ),
+            ],
+          ),
+        ],
+      ],
+    );
+
+    if (emphasized) {
+      return AppHeroCard(
+        padding: EdgeInsets.all(
+          compact ? AppSpacing.space4 : AppSpacing.space5,
+        ),
+        onTap: onOpen,
+        child: content,
+      );
+    }
     return AppCard(
-      emphasized: emphasized,
-      borderColor: emphasized ? scheme.primary.withValues(alpha: 0.45) : null,
       padding: EdgeInsets.all(compact ? AppSpacing.space3 : AppSpacing.space4),
       onTap: onOpen,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Row(
-            children: <Widget>[
-              StatusTag(
-                label: isPast ? '지난보스' : schedule.type,
-                foregroundColor: isPast ? palette.danger : colors.$1,
-                backgroundColor: isPast ? palette.dangerSoft : colors.$2,
-              ),
-              if (schedule.isMung) ...<Widget>[
-                const SizedBox(width: AppSpacing.space2),
-                StatusTag(
-                  label: '멍',
-                  foregroundColor: palette.bossFixed,
-                  backgroundColor: palette.bossFixedSoft,
-                ),
-              ],
-              if (emphasized) ...<Widget>[
-                const SizedBox(width: AppSpacing.space2),
-                Text(
-                  '다음 보스',
-                  style: AppTextStyles.caption.copyWith(color: scheme.primary),
-                ),
-              ],
-              const Spacer(),
-              Text(
-                _timeLabel(schedule.spawnTime, now),
-                style: AppTextStyles.bodyStrong.copyWith(
-                  fontFeatures: const <FontFeature>[
-                    FontFeature.tabularFigures(),
-                  ],
-                ),
-              ),
-            ],
+      child: content,
+    );
+  }
+
+  Widget _buildNextHeader(
+    ColorScheme scheme,
+    AppThemePalette palette,
+    (Color, Color) colors,
+  ) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        DecoratedBox(
+          key: ValueKey<String>('schedule-next-icon-${schedule.voteKey}'),
+          decoration: BoxDecoration(
+            color: scheme.primary.withValues(
+              alpha: palette.isDark ? 0.2 : 0.12,
+            ),
+            shape: BoxShape.circle,
           ),
-          SizedBox(height: compact ? AppSpacing.space2 : AppSpacing.space3),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    Text(schedule.boss, style: AppTextStyles.cardTitle),
-                    if (!compact) ...<Widget>[
-                      const SizedBox(height: 3),
-                      Text(
-                        schedule.region,
-                        style: AppTextStyles.label.copyWith(
-                          color: scheme.onSurfaceVariant,
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              if (!isPast &&
-                  remaining <= const Duration(minutes: 59).inMilliseconds)
-                Text(
-                  _countdownLabel(remaining),
-                  style: AppTextStyles.countdown.copyWith(
-                    color:
-                        remaining <= const Duration(minutes: 5).inMilliseconds
-                        ? palette.warning
-                        : scheme.primary,
-                  ),
-                ),
-            ],
+          child: Padding(
+            padding: EdgeInsets.all(AppSpacing.space2),
+            child: Icon(Icons.bolt_rounded, size: 18, color: scheme.primary),
           ),
-          if (!compact && (isTarget || canOperateSchedules)) ...<Widget>[
-            const SizedBox(height: AppSpacing.space3),
-            Wrap(
-              spacing: AppSpacing.space2,
-              runSpacing: AppSpacing.space2,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: <Widget>[
-                if (isTarget && joined)
-                  _SmallAction(
-                    label: '참여목록 ${participants.length}',
-                    icon: Icons.groups_2_outlined,
-                    onPressed: onParticipants,
-                  )
-                else if (isTarget && !closed)
-                  _SmallAction(
-                    label: '참여',
-                    icon: Icons.check_circle_outline_rounded,
-                    highlighted: true,
-                    onPressed: onParticipate,
-                  )
-                else if (isTarget)
-                  Text('참여마감', style: AppTextStyles.caption),
-                if (canOperateSchedules && !schedule.isFixed)
-                  _SmallAction(
-                    label: schedule.type == '침공' ? '종료' : '컷',
-                    icon: Icons.done_rounded,
-                    onPressed: onCut,
-                  ),
-                if (canOperateSchedules &&
-                    isPast &&
-                    schedule.type != '침공' &&
-                    !schedule.isFixed)
-                  _SmallAction(
-                    label: '멍',
-                    icon: Icons.refresh_rounded,
-                    onPressed: onMung,
-                  ),
-                if (canOperateSchedules && schedule.id != null)
-                  IconButton(
-                    visualDensity: VisualDensity.compact,
-                    tooltip: '삭제',
-                    onPressed: onDelete,
-                    icon: const Icon(Icons.close_rounded, size: 18),
-                  ),
-              ],
+        ),
+        const SizedBox(width: AppSpacing.space2),
+        _buildTypeBadges(palette, colors),
+        const Spacer(),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: <Widget>[
+            Text(
+              'NEXT',
+              textAlign: TextAlign.end,
+              style: AppTextStyles.bodyStrong.copyWith(
+                color: scheme.primary,
+                letterSpacing: 1.1,
+              ),
+            ),
+            const SizedBox(height: AppSpacing.space1),
+            Text(
+              '가장 가까운 출현 일정',
+              textAlign: TextAlign.end,
+              style: AppTextStyles.caption.copyWith(
+                color: scheme.onSurfaceVariant,
+              ),
             ),
           ],
-        ],
-      ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildRegularHeader(
+    ColorScheme scheme,
+    AppThemePalette palette,
+    (Color, Color) colors,
+    bool isPast,
+  ) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Expanded(child: _buildTypeBadges(palette, colors, isPast: isPast)),
+        const SizedBox(width: AppSpacing.space2),
+        Flexible(
+          child: Text(
+            _timeLabel(schedule.spawnTime, now),
+            textAlign: TextAlign.end,
+            style: AppTextStyles.bodyStrong.copyWith(
+              color: scheme.onSurface,
+              fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTypeBadges(
+    AppThemePalette palette,
+    (Color, Color) colors, {
+    bool isPast = false,
+  }) {
+    return Wrap(
+      spacing: AppSpacing.space1,
+      runSpacing: AppSpacing.space1,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: <Widget>[
+        StatusTag(
+          key: ValueKey<String>('schedule-type-${schedule.voteKey}'),
+          label: schedule.type,
+          foregroundColor: colors.$1,
+          backgroundColor: colors.$2,
+        ),
+        if (isPast)
+          StatusTag(
+            label: '지난보스',
+            foregroundColor: palette.danger,
+            backgroundColor: palette.dangerSoft,
+          ),
+        if (schedule.isMung)
+          StatusTag(
+            label: '멍',
+            foregroundColor: palette.bossFixed,
+            backgroundColor: palette.bossFixedSoft,
+          ),
+      ],
+    );
+  }
+
+  Widget _buildNextDetails(
+    ColorScheme scheme,
+    AppThemePalette palette,
+    int remaining,
+  ) {
+    final countdownColor =
+        remaining <= const Duration(minutes: 5).inMilliseconds
+        ? palette.warning
+        : scheme.primary;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                schedule.boss,
+                key: ValueKey<String>('schedule-boss-${schedule.voteKey}'),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: AppTextStyles.display.copyWith(color: scheme.onSurface),
+              ),
+              const SizedBox(height: AppSpacing.space2),
+              Row(
+                children: <Widget>[
+                  Icon(
+                    Icons.schedule_rounded,
+                    size: 16,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                  const SizedBox(width: AppSpacing.space1),
+                  Flexible(
+                    child: Text(
+                      compact
+                          ? _timeLabel(schedule.spawnTime, now)
+                          : '${_timeLabel(schedule.spawnTime, now)} · ${schedule.region}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTextStyles.label.copyWith(
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: AppSpacing.space3),
+        DecoratedBox(
+          decoration: BoxDecoration(
+            color: scheme.primary.withValues(
+              alpha: palette.isDark ? 0.18 : 0.1,
+            ),
+            borderRadius: BorderRadius.circular(AppRadii.control),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.space3,
+              AppSpacing.space2,
+              AppSpacing.space3,
+              AppSpacing.space2,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: <Widget>[
+                Text(
+                  '출현까지',
+                  style: AppTextStyles.caption.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.space1),
+                Text(
+                  _countdownLabel(remaining),
+                  style: AppTextStyles.display.copyWith(color: countdownColor),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildRegularDetails(
+    ColorScheme scheme,
+    AppThemePalette palette,
+    bool isPast,
+    int remaining,
+  ) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                schedule.boss,
+                key: ValueKey<String>('schedule-boss-${schedule.voteKey}'),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: AppTextStyles.cardTitle,
+              ),
+              if (!compact) ...<Widget>[
+                const SizedBox(height: 3),
+                Text(
+                  schedule.region,
+                  style: AppTextStyles.label.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+        if (!isPast && remaining <= const Duration(minutes: 59).inMilliseconds)
+          Text(
+            _countdownLabel(remaining),
+            style: AppTextStyles.countdown.copyWith(
+              color: remaining <= const Duration(minutes: 5).inMilliseconds
+                  ? palette.warning
+                  : scheme.primary,
+            ),
+          ),
+      ],
     );
   }
 

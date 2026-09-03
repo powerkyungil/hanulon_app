@@ -11,6 +11,7 @@ import '../../../core/network/api_exception.dart';
 import '../../../core/widgets/app_button.dart';
 import '../../../core/widgets/app_card.dart';
 import '../../../core/widgets/app_text_field.dart';
+import '../../../core/widgets/privacy_policy_button.dart';
 import '../data/auth_repository.dart';
 import '../domain/character_options.dart';
 import '../domain/registration_mode.dart';
@@ -109,7 +110,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
     };
 
     try {
-      await ref
+      final generatedInviteCode = await ref
           .read(authRepositoryProvider)
           .register(
             RegistrationRequest(
@@ -127,15 +128,21 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
             ),
           );
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            registrationMode == RegistrationMode.createGuild
-                ? '길드가 생성되었습니다. 마스터 계정으로 로그인해 주세요.'
-                : '가입이 완료되었습니다. 로그인해 주세요.',
+      if (registrationMode == RegistrationMode.createGuild &&
+          generatedInviteCode != null) {
+        await _showCreatedGuildDialog(generatedInviteCode);
+        if (!mounted) return;
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              registrationMode == RegistrationMode.createGuild
+                  ? '길드가 생성되었습니다. 마스터 계정으로 로그인해 주세요.'
+                  : '가입이 완료되었습니다. 로그인해 주세요.',
+            ),
           ),
-        ),
-      );
+        );
+      }
       context.go('/login');
     } catch (error) {
       if (!mounted) return;
@@ -143,6 +150,24 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
     } finally {
       if (mounted) setState(() => _isBusy = false);
     }
+  }
+
+  Future<void> _showCreatedGuildDialog(String inviteCode) {
+    return showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => CreatedGuildInviteDialog(
+        inviteCode: inviteCode,
+        onCopy: () async {
+          await Clipboard.setData(ClipboardData(text: inviteCode));
+          if (!mounted) return;
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('가입 코드를 복사했습니다.')));
+        },
+        onContinue: () => Navigator.of(dialogContext).pop(),
+      ),
+    );
   }
 
   String _messageFor(Object error, RegistrationMode registrationMode) {
@@ -240,7 +265,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                     const SizedBox(width: AppSpacing.space3),
                     Expanded(
                       child: Text(
-                        '길드를 생성하면 이 계정이 길드장이 됩니다. 생성 후 길드 설정에서 고정 가입 코드를 만들고 변경할 수 있어요.',
+                        '길드를 생성하면 이 계정이 길드장이 되고 6자리 가입 코드가 자동 생성됩니다.',
                         style: AppTextStyles.caption,
                       ),
                     ),
@@ -379,6 +404,8 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
               ),
             ],
             const SizedBox(height: AppSpacing.space6),
+            const Center(child: PrivacyPolicyButton()),
+            const SizedBox(height: AppSpacing.space2),
             AppButton(
               label: '가입 완료',
               onPressed: _submit,
@@ -402,6 +429,47 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
       _registrationMode = mode;
       _errorMessage = null;
     });
+  }
+}
+
+class CreatedGuildInviteDialog extends StatelessWidget {
+  const CreatedGuildInviteDialog({
+    required this.inviteCode,
+    required this.onCopy,
+    required this.onContinue,
+    super.key,
+  });
+
+  final String inviteCode;
+  final VoidCallback onCopy;
+  final VoidCallback onContinue;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('길드가 생성되었습니다'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          const Text('길드원에게 아래 가입 코드를 공유해 주세요.'),
+          const SizedBox(height: AppSpacing.space3),
+          SelectableText(
+            inviteCode,
+            textAlign: TextAlign.center,
+            style: AppTextStyles.sectionTitle.copyWith(letterSpacing: 2),
+          ),
+        ],
+      ),
+      actions: <Widget>[
+        TextButton.icon(
+          onPressed: onCopy,
+          icon: const Icon(Icons.copy_rounded),
+          label: const Text('코드 복사'),
+        ),
+        FilledButton(onPressed: onContinue, child: const Text('로그인하기')),
+      ],
+    );
   }
 }
 

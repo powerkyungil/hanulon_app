@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:odin_guild_app/app/theme/app_theme.dart';
+import 'package:odin_guild_app/features/auth/application/auth_controller.dart';
+import 'package:odin_guild_app/features/auth/domain/session.dart';
 import 'package:odin_guild_app/features/auth/domain/user_role.dart';
 import 'package:odin_guild_app/features/boss_vote/data/boss_vote_repository.dart';
 import 'package:odin_guild_app/features/boss_vote/domain/manual_vote_input.dart';
@@ -26,6 +28,7 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
+          authControllerProvider.overrideWith(_FakeAuthController.new),
           scheduleRepositoryProvider.overrideWithValue(
             _FakeScheduleRepository(),
           ),
@@ -40,7 +43,7 @@ void main() {
         child: MaterialApp(theme: AppTheme.light, home: const HomeScreen()),
       ),
     );
-    await tester.pump();
+    await tester.pumpAndSettle();
 
     expect(find.text('다음 보스'), findsOneWidget);
     expect(find.text('예정된 일정이 없어요'), findsOneWidget);
@@ -52,6 +55,19 @@ void main() {
 
     expect(find.text('공지사항'), findsOneWidget);
   });
+}
+
+class _FakeAuthController extends AuthController {
+  @override
+  Future<Session?> build() async {
+    return const Session(
+      accessToken: 'test-token',
+      userId: 1,
+      username: 'tester',
+      nickname: '',
+      role: UserRole.unknown,
+    );
+  }
 }
 
 class _FakeScheduleRepository implements ScheduleRepository {

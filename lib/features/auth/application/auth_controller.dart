@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,6 +9,7 @@ import '../domain/session.dart';
 import '../domain/profile_update_request.dart';
 import '../domain/user_profile.dart';
 import '../domain/user_role.dart';
+import '../../push_notifications/application/push_notification_service.dart';
 
 class AuthController extends AsyncNotifier<Session?> {
   @override
@@ -31,6 +33,7 @@ class AuthController extends AsyncNotifier<Session?> {
       }
 
       state = AsyncData<Session?>(session);
+      _registerPushTokenWithoutBlocking();
       return session;
     } catch (error, stackTrace) {
       state = AsyncError<Session?>(error, stackTrace);
@@ -99,6 +102,7 @@ class AuthController extends AsyncNotifier<Session?> {
       await tokenStorage.writeToken(session.accessToken, persist: autoLogin);
 
       state = AsyncData<Session?>(session);
+      _registerPushTokenWithoutBlocking();
       return session;
     } catch (error, stackTrace) {
       await tokenStorage.clearToken();
@@ -108,6 +112,27 @@ class AuthController extends AsyncNotifier<Session?> {
   }
 
   Future<void> logout() async {
+    try {
+      await ref.read(pushTokenLifecycleProvider).removeBeforeLogout();
+    } catch (_) {
+      // Token cleanup failure must not keep the user signed in locally.
+    }
+    await ref.read(tokenStorageProvider).clearToken();
+    state = const AsyncData<Session?>(null);
+  }
+
+  void _registerPushTokenWithoutBlocking() {
+    try {
+      unawaited(
+        ref.read(pushTokenLifecycleProvider).registerAfterAuthentication(),
+      );
+    } catch (_) {
+      // Firebase can be unavailable on unsupported test/runtime platforms.
+    }
+  }
+
+  Future<void> deleteAccount({required String password}) async {
+    await ref.read(authRepositoryProvider).deleteMe(password: password);
     await ref.read(tokenStorageProvider).clearToken();
     state = const AsyncData<Session?>(null);
   }

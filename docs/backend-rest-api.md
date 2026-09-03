@@ -139,6 +139,7 @@ voteKey는 URL path에 들어가므로 서버는 path decoding을 적용해야 �
 | 인증 | POST | /api/v1/auth/register | 아니오 | - |
 | 사용자 | GET | /api/users/me | 예 | MEMBER |
 | 사용자 | PUT | /api/users/me | 예 | MEMBER |
+| 사용자 | DELETE | /api/users/me | 예 | MEMBER |
 | 사용자 | GET | /api/users | 예 | MEMBER |
 | 사용자 관리 | PUT | /api/admin/users/:id/role | 예 | MASTER |
 | 사용자 관리 | PUT | /api/admin/guild/master | 예 | MASTER |
@@ -328,6 +329,18 @@ PUT /api/users/me는 다음 필드를 받는다.
 | password | string | 아니오 | 값이 있을 때만 변경, 최소 6자 |
 
 응답 body는 사용하지 않으므로 204를 반환해도 된다. 저장 후 클라이언트는 다시 GET /api/users/me를 호출한다.
+
+### 회원 탈퇴
+
+`DELETE /api/users/me`는 로그인한 사용자의 현재 비밀번호를 받아 본인 여부를 다시 확인한다.
+
+```json
+{
+  "password": "current-password"
+}
+```
+
+성공하면 계정과 해당 사용자의 개인 캐릭터·활동 데이터를 하나의 transaction에서 하드 삭제하고 `204 No Content`를 반환한다. 다른 길드원의 데이터와 공유 길드 데이터는 삭제하지 않는다. 다른 길드원이 있는 MASTER 계정은 삭제하지 않고 역할 이전을 요구하는 `409 Conflict` 오류를 반환한다. MASTER가 길드의 유일한 회원이면 계정과 길드 종속 데이터를 같은 transaction에서 하드 삭제한다. 성공 후 기존 access token으로 보호 API를 호출할 수 없어야 한다.
 
 ### 5.4 길드원 조회·관리
 

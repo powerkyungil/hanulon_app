@@ -11,13 +11,19 @@ import 'package:odin_guild_app/features/auth/domain/profile_settings.dart';
 import 'package:odin_guild_app/features/auth/domain/registration_request.dart';
 import 'package:odin_guild_app/features/auth/domain/user_profile.dart';
 import 'package:odin_guild_app/features/auth/domain/user_role.dart';
+import 'package:odin_guild_app/features/push_notifications/application/push_notification_service.dart';
 
 void main() {
   group('AuthController', () {
     test('로그인 응답의 사용자 정보와 토큰을 세션에 저장한다', () async {
       final storage = _FakeTokenStorage();
       final repository = _FakeAuthRepository();
-      final container = _createContainer(storage, repository);
+      final pushLifecycle = _FakePushTokenLifecycle();
+      final container = _createContainer(
+        storage,
+        repository,
+        pushLifecycle: pushLifecycle,
+      );
       addTearDown(container.dispose);
       await container.read(authControllerProvider.future);
 
@@ -30,6 +36,7 @@ void main() {
       expect(storage.token, 'access-token');
       expect(storage.persist, isFalse);
       expect(container.read(authControllerProvider).value, same(session));
+      expect(pushLifecycle.registrationCount, 1);
     });
 
     test('저장된 토큰으로 사용자 세션을 복원한다', () async {
@@ -41,7 +48,12 @@ void main() {
           role: 'MASTER',
         );
       final repository = _FakeAuthRepository();
-      final container = _createContainer(storage, repository);
+      final pushLifecycle = _FakePushTokenLifecycle();
+      final container = _createContainer(
+        storage,
+        repository,
+        pushLifecycle: pushLifecycle,
+      );
       addTearDown(container.dispose);
       await container.read(authControllerProvider.future);
 
@@ -52,6 +64,7 @@ void main() {
       expect(session?.userId, 7);
       expect(session?.nickname, '프레이야');
       expect(session?.accessToken, storage.token);
+      expect(pushLifecycle.registrationCount, 1);
     });
 
     test('세션 복원 시 JWT의 로그인 아이디를 읽기 전용 표시값으로 사용한다', () async {
@@ -77,12 +90,34 @@ void main() {
     test('로그아웃하면 저장된 토큰과 세션을 비운다', () async {
       final storage = _FakeTokenStorage()..token = 'saved-token';
       final repository = _FakeAuthRepository();
-      final container = _createContainer(storage, repository);
+      final pushLifecycle = _FakePushTokenLifecycle();
+      final container = _createContainer(
+        storage,
+        repository,
+        pushLifecycle: pushLifecycle,
+      );
       addTearDown(container.dispose);
       await container.read(authControllerProvider.future);
 
       await container.read(authControllerProvider.notifier).logout();
 
+      expect(storage.token, isNull);
+      expect(container.read(authControllerProvider).value, isNull);
+      expect(pushLifecycle.removalCount, 1);
+    });
+
+    test('회원 탈퇴가 성공하면 비밀번호를 전달하고 토큰과 세션을 비운다', () async {
+      final storage = _FakeTokenStorage()..token = 'saved-token';
+      final repository = _FakeAuthRepository();
+      final container = _createContainer(storage, repository);
+      addTearDown(container.dispose);
+      await container.read(authControllerProvider.future);
+
+      await container
+          .read(authControllerProvider.notifier)
+          .deleteAccount(password: 'current-password');
+
+      expect(repository.deletedWithPassword, 'current-password');
       expect(storage.token, isNull);
       expect(container.read(authControllerProvider).value, isNull);
     });
@@ -153,14 +188,33 @@ String _tokenWithClaims({
 
 ProviderContainer _createContainer(
   TokenStorage storage,
-  AuthRepository repository,
-) {
+  AuthRepository repository, {
+  PushTokenLifecycle? pushLifecycle,
+}) {
   return ProviderContainer(
     overrides: [
       tokenStorageProvider.overrideWithValue(storage),
       authRepositoryProvider.overrideWithValue(repository),
+      pushTokenLifecycleProvider.overrideWithValue(
+        pushLifecycle ?? _FakePushTokenLifecycle(),
+      ),
     ],
   );
+}
+
+class _FakePushTokenLifecycle implements PushTokenLifecycle {
+  int registrationCount = 0;
+  int removalCount = 0;
+
+  @override
+  Future<void> registerAfterAuthentication() async {
+    registrationCount++;
+  }
+
+  @override
+  Future<void> removeBeforeLogout() async {
+    removalCount++;
+  }
 }
 
 class _FakeTokenStorage implements TokenStorage {
@@ -181,6 +235,13 @@ class _FakeTokenStorage implements TokenStorage {
 }
 
 class _FakeAuthRepository implements AuthRepository {
+  String? deletedWithPassword;
+
+  @override
+  Future<void> deleteMe({required String password}) async {
+    deletedWithPassword = password;
+  }
+
   @override
   Future<UserProfile> fetchMe() async {
     return const UserProfile(id: 7, role: UserRole.admin, nickname: '프레이야');
@@ -206,7 +267,7 @@ class _FakeAuthRepository implements AuthRepository {
   }
 
   @override
-  Future<void> register(RegistrationRequest request) async {}
+  Future<String?> register(RegistrationRequest request) async => null;
 
   @override
   Future<void> updateMe(ProfileUpdateRequest request) async {}

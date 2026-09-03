@@ -84,7 +84,7 @@ Flutter가 담당하는 영역과 백엔드가 담당하는 영역을 다음처�
 | 보스 젠 시간 계산 | 표시용 카운트다운만 담당 | 기준 시간, 쿨타임, 다음 젠 계산 |
 | 투표 결과 | 결과 표시·상태 갱신 | 저장·중복 방지·일관성 보장 |
 | OCR | 이미지 선택·미리보기·업로드 | OCR 비밀키 보관·외부 OCR 호출 |
-| 알림 | 포그라운드 로컬 알림·음성 | 예약 이벤트·향후 FCM/APNs 발송 |
+| 알림 | FCM 토큰 수명주기·포그라운드 로컬 표시·탭 라우팅·음성 | 보스 알림 예약·FCM 발송·발송 이력 중복 방지 |
 | DB/파일 | 접근하지 않음 | SQLite 또는 별도 DB 관리 |
 
 ### 3.2 추천 Flutter 기술 구성
@@ -102,6 +102,7 @@ Flutter가 담당하는 영역과 백엔드가 담당하는 영역을 다음처�
 | 날짜/시간 | `intl`, Asia/Seoul 기준 포맷터 |
 | 이미지 선택 | `image_picker` 또는 `file_picker` |
 | 로컬 알림 | `flutter_local_notifications` |
+| 원격 알림 | `firebase_core` + `firebase_messaging` (현재 Android만 지원) |
 | 음성 알림 | `flutter_tts`를 선택 기능으로 적용 |
 | 드래그 앤 드롭 | Flutter 기본 `Draggable`/`DragTarget` 또는 검증된 reorder 패키지 |
 
@@ -333,7 +334,12 @@ flowchart TD
 - 서버 시각과 로컬 시각의 offset을 계산해 카운트다운 오차를 줄임
 - 포그라운드에서 출현 5분 전·1분 전·출현 시점 알림
 - 음성 알림 on/off와 테스트 버튼
-- 백그라운드/강제 종료 상태의 알림은 FCM/APNs 설계 이후 추가
+- Android 백그라운드/강제 종료 알림은 FCM notification+data 메시지로 수신
+- Android 백그라운드/강제 종료 상태에서도 FCM 백그라운드 handler가 음성 설정을 확인한 뒤 보스 알림 문장을 TTS로 재생
+- iOS 포그라운드 음성은 `AVAudioSession`을 재생·음성 안내 모드로 설정한 뒤 `flutter_tts`로 재생
+- iOS 백그라운드에서 동적인 보스 문장을 TTS로 재생하는 것은 현재 지원 범위에 포함하지 않으며, iOS FCM/APNs 알림음은 별도 인증·백그라운드 정책 검토가 필요함
+- 포그라운드 FCM은 `flutter_local_notifications`로 표시하고 알림 탭 시 일정 화면으로 이동
+- 로컬 일정 알림과 FCM은 보스 정의 ID·출현 시각·리드타임 occurrence 및 `notificationKey`로 중복 방지
 
 ### 5.4 보스 참여 투표
 
@@ -521,7 +527,7 @@ Flutter 1차 구현은 기존 V1이 아닌 안정적인 V2 API를 사용한다.
 
 | Feature | 주요 API |
 | --- | --- |
-| 인증 | `POST /api/v1/auth/login`, `POST /api/v1/auth/register`, `GET/PUT /api/users/me` |
+| 인증 | `POST /api/v1/auth/login`, `POST /api/v1/auth/register`, `GET/PUT/DELETE /api/users/me` |
 | 사용자 | `GET /api/users`, `PUT /api/admin/users/:id/role`, `PUT /api/admin/guild/master`, `PUT /api/admin/users/:id/reset-password`, `DELETE /api/admin/users/:id` |
 | 공통 | `GET /api/time`, `GET/POST /api/settings`, `GET/POST /api/invites` |
 | 보스 정의 | `GET /api/custom-bosses`, `POST /api/custom-bosses`, `POST /api/custom-bosses/reorder`, `DELETE /api/custom-bosses/:id` |
@@ -535,6 +541,7 @@ Flutter 1차 구현은 기존 V1이 아닌 안정적인 V2 API를 사용한다.
 | 컬렉션 | `/api/v2/collections`, `/api/v2/user-collections`, `/api/excluded-members` |
 | 그룹 | `/api/groups`, `/api/groups/:id/members` |
 | 공성전 | `/api/siege`, `/api/siege/me`, `/api/admin/siege/:id`, `/api/siege/all` |
+| 푸시 알림 | `PUT/DELETE /api/v1/push-tokens` |
 
 고정 가입 코드 계약은 다음을 기준으로 한다.
 
@@ -552,7 +559,83 @@ Flutter 1차 구현은 기존 V1이 아닌 안정적인 V2 API를 사용한다.
 
 현재 API를 그대로 사용할 경우 `ApiPaths`에 경로를 한 곳에서 관리한다. 백엔드가 준비되면 `/api/v1` 버전 경로로 이전하되, 화면·도메인 계층은 변경하지 않도록 repository만 교체한다.
 
-### 6.3 핵심 도메인 모델
+### 6.3 Android FCM 기기 토큰 계약
+
+- 모든 요청은 `Authorization: Bearer <accessToken>`을 사용한다.
+- 앱이 로그인 세션을 복원하거나 로그인에 성공하고 알림 권한을 얻은 뒤 FCM 토큰을 조회해 아래 등록 API를 호출한다.
+- Firebase의 `onTokenRefresh`가 새 토큰을 전달할 때 같은 API를 다시 호출한다. 서버는 `deviceId` 기준 이전 토큰을 교체한다.
+- 로그아웃하기 전에 현재 토큰으로 삭제 API를 호출한다. 네트워크 실패로 삭제하지 못해도 다음 계정이 등록하면 동일 토큰의 소유권은 새 계정으로 이전된다.
+- `deviceId`는 앱 설치 단위로 생성해 secure storage에 보존하는 임의 UUID이며 Android 하드웨어 식별자를 사용하지 않는다.
+
+등록·갱신:
+
+```http
+PUT /api/v1/push-tokens
+Authorization: Bearer <accessToken>
+Content-Type: application/json
+
+{
+  "token": "<FCM registration token>",
+  "platform": "ANDROID",
+  "deviceId": "<installation UUID>"
+}
+```
+
+```json
+{
+  "data": {
+    "id": 12,
+    "platform": "ANDROID",
+    "deviceId": "<installation UUID>",
+    "updatedAt": 1787461200000
+  }
+}
+```
+
+삭제:
+
+```http
+DELETE /api/v1/push-tokens
+Authorization: Bearer <accessToken>
+Content-Type: application/json
+
+{ "token": "<FCM registration token>" }
+```
+
+성공 응답은 `204 No Content`이다. 삭제는 멱등적으로 처리되어 이미 없는 본인 토큰도 204를 반환한다. 토큰은 20~4096자, `deviceId`는 1~200자이며 iOS는 현재 계약 범위에 포함하지 않는다.
+
+보스 알림의 notification title/body와 함께 다음 string data payload가 전달된다.
+
+```json
+{
+  "type": "BOSS_SCHEDULE",
+  "notificationKey": "boss:1:7:1787461500000:300",
+  "guildId": "1",
+  "scheduleId": "42",
+  "bossDefinitionId": "7",
+  "bossType": "필드",
+  "region": "미드가르드",
+  "boss": "파르바",
+  "spawnTime": "1787461500000",
+  "leadSeconds": "300"
+}
+```
+
+`leadSeconds`는 `300`, `60`, `0` 중 하나이며 고정 일정은 별도 DB 일정 row가 없으므로 `scheduleId`가 빈 문자열이다. Android 프로젝트에는 중요도가 높은 `boss_schedule_alerts` notification channel을 앱 시작 시 생성해야 한다. 기존 로컬 알림과 FCM을 함께 운영하는 전환 기간에는 `notificationKey`를 로컬 저장소의 최근 처리 키와 비교해 같은 occurrence·시점 알림을 한 번만 표시한다. 알림 탭 시 일정 화면으로 이동한 뒤 `bossDefinitionId`와 `spawnTime`을 기준으로 최신 목록을 다시 조회한다.
+
+Flutter 구현 경계는 다음을 따른다.
+
+- `features/push_notifications/data`가 토큰 REST API와 최근 처리 키 저장을 담당하고 화면은 Dio/Firebase를 직접 호출하지 않는다.
+- 설치 UUID는 `flutter_secure_storage`의 `installation_device_id`에 저장하며 Android 하드웨어 식별자나 사용자 개인정보를 사용하지 않는다.
+- 앱 시작 시 Firebase와 백그라운드 handler를 초기화하고 `boss_schedule_alerts` 채널을 명시적으로 생성한 뒤 Android 13 이상의 알림 권한을 요청한다.
+- 인증 controller는 access token 저장 후 비동기로 토큰 등록을 요청한다. 등록 실패는 로그인·세션 복원을 실패시키지 않으며 10초, 1분, 5분 간격으로 재시도한다.
+- `onTokenRefresh`는 인증된 세션에서 동일 deviceId로 새 토큰을 등록하고, 로그아웃은 access token을 지우기 전에 현재 FCM 토큰 삭제를 먼저 시도한다.
+- 최근 notificationKey와 `bossDefinitionId:spawnTime:leadSeconds` occurrence 키를 각각 최대 100개 보존한다. FCM과 기존 로컬 알림의 키 형식이 달라도 occurrence가 같으면 한 번만 표시한다.
+- 백그라운드 handler는 수신 키를 최근 처리 목록에 반영하고 중복이 아니며 음성 설정이 켜져 있으면 `flutter_tts`로 notification body를 읽는다. Android 시스템은 notification payload도 표시하며, TTS 실패 시에도 알림 표시는 유지한다. 포그라운드에서는 앱이 로컬 알림과 TTS로 표시한다.
+- 알림 탭은 `/schedule?bossDefinitionId=...&spawnTime=...`로 이동해 목록 provider를 무효화하고 재조회한다. 고정 보스는 `scheduleId`에 의존하지 않는다.
+- FCM registration token, access token, Authorization header와 payload의 사용자 관련 값은 로그에 출력하지 않는다.
+
+### 6.4 핵심 도메인 모델
 
 앱에서 우선 정의할 모델은 다음과 같다.
 
@@ -601,6 +684,7 @@ SiegeStatus
 | 세션 상태 | 토큰, 현재 사용자, 역할 | Secure Storage + auth provider |
 | 화면 상태 | 선택된 탭, 검색어, 모달 열림 | 해당 화면 provider 또는 `StateProvider` |
 | 사용자 설정 | 테마, 일정 보기 방식, 음성 여부 | `shared_preferences` |
+| 푸시 설치·중복 상태 | 설치 UUID, 최근 notificationKey·occurrence | Secure Storage + `shared_preferences` |
 | 임시 입력 | 일정 입력 초안, OCR 선택 파일 | 화면 상태. 필요 시 draft 저장 |
 
 ### 7.2 비동기 화면 공통 상태
@@ -744,6 +828,9 @@ SiegeStatus
 - 컬렉션 이름 수정 후 체크 상태 유지
 - 그룹 드롭 저장 실패 후 복구
 - 앱 백그라운드 복귀 시 polling 재개
+- 로그인·자동 로그인 성공 후 FCM 토큰 등록, refresh 재등록, 로그아웃 전 삭제
+- 포그라운드 표시와 백그라운드·종료 상태 알림 탭의 일정 화면 이동
+- 로컬 일정 알림과 FCM의 notificationKey·occurrence 중복 방지
 
 ## 12. 완료 기준
 

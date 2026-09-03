@@ -29,5 +29,6 @@ void main() {
     );
     expect(find.text('길드의 일정과 참여를 한눈에'), findsOneWidget);
     expect(find.text('로그인'), findsWidgets);
+    expect(find.text('개인정보처리방침'), findsOneWidget);
   });
 }

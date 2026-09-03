@@ -9,6 +9,7 @@ import '../../../app/theme/app_theme_palette.dart';
 import '../../../app/theme/theme_controller.dart';
 import '../../../core/widgets/app_card.dart';
 import '../../../core/widgets/confirm_dialog.dart';
+import '../../../core/widgets/privacy_policy_button.dart';
 import '../../../core/permissions/role_guard.dart';
 import '../../auth/application/auth_controller.dart';
 import '../../auth/domain/user_role.dart';
@@ -136,6 +137,7 @@ class MoreScreen extends ConsumerWidget {
           const SizedBox(height: AppSpacing.space3),
           const _ThemeSelector(),
           const SizedBox(height: AppSpacing.space4),
+          const PrivacyPolicyButton(),
           TextButton(
             onPressed: () => _logout(context, ref),
             child: Text('로그아웃', style: TextStyle(color: palette.danger)),

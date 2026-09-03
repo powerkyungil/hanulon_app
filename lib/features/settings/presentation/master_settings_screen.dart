@@ -266,7 +266,7 @@ class _MasterSettingsScreenState extends ConsumerState<MasterSettingsScreen> {
               AppTextField(
                 label: '가입 코드',
                 controller: _customInviteCode,
-                hintText: '예: APPLE123 · 비워두면 새 랜덤 코드 생성',
+                hintText: '예: A1B2C3 · 비워두면 새 6자리 코드 생성',
                 prefixIcon: Icons.edit_outlined,
                 inputFormatters: <TextInputFormatter>[
                   FilteringTextInputFormatter.allow(RegExp(r'[A-Za-z0-9_-]')),

@@ -134,8 +134,18 @@ final appRouterProvider = Provider<GoRouter>((ref) {
               GoRoute(
                 path: '/schedule',
                 name: 'schedule',
-                pageBuilder: (_, state) =>
-                    _noTransitionPage(state, const ScheduleScreen()),
+                pageBuilder: (_, state) => _noTransitionPage(
+                  state,
+                  ScheduleScreen(
+                    key: ValueKey<String>(state.uri.toString()),
+                    targetBossDefinitionId: int.tryParse(
+                      state.uri.queryParameters['bossDefinitionId'] ?? '',
+                    ),
+                    targetSpawnTime: int.tryParse(
+                      state.uri.queryParameters['spawnTime'] ?? '',
+                    ),
+                  ),
+                ),
               ),
             ],
           ),

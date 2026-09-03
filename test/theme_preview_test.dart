@@ -94,6 +94,7 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
+          authControllerProvider.overrideWith(_PreviewHomeAuthController.new),
           scheduleRepositoryProvider.overrideWithValue(
             _PreviewScheduleRepository(),
           ),
@@ -1330,6 +1331,9 @@ class _LargePreviewCollectionRepository extends _PreviewCollectionRepository {
 
 class _PreviewAuthRepository implements AuthRepository {
   @override
+  Future<void> deleteMe({required String password}) async {}
+
+  @override
   Future<UserProfile> fetchMe() async {
     return const UserProfile(
       id: 7,
@@ -1367,7 +1371,7 @@ class _PreviewAuthRepository implements AuthRepository {
   }
 
   @override
-  Future<void> register(RegistrationRequest request) async {}
+  Future<String?> register(RegistrationRequest request) async => null;
 
   @override
   Future<void> updateMe(ProfileUpdateRequest request) async {}
@@ -1382,6 +1386,19 @@ class _PreviewAuthController extends AuthController {
       username: 'odin_master',
       nickname: '프레이야',
       role: UserRole.master,
+    );
+  }
+}
+
+class _PreviewHomeAuthController extends AuthController {
+  @override
+  Future<Session?> build() async {
+    return const Session(
+      accessToken: 'preview-token',
+      userId: 7,
+      username: 'odin_master',
+      nickname: '',
+      role: UserRole.unknown,
     );
   }
 }

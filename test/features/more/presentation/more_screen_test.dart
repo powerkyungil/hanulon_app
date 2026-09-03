@@ -41,6 +41,22 @@ void main() {
 
     expect(find.text('내 정보 화면'), findsOneWidget);
   });
+
+  testWidgets('로그인 후에도 개인정보처리방침에 접근할 수 있다', (tester) async {
+    final router = _router();
+    addTearDown(router.dispose);
+
+    await tester.pumpWidget(_buildApp(router));
+    await tester.pumpAndSettle();
+
+    await tester.scrollUntilVisible(
+      find.text('개인정보처리방침'),
+      300,
+      scrollable: find.byType(Scrollable),
+    );
+
+    expect(find.text('개인정보처리방침'), findsOneWidget);
+  });
 }
 
 Widget _buildApp(GoRouter router) {
