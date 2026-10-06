@@ -1434,6 +1434,9 @@ class _PreviewMemberRepository implements MemberRepository {
   Future<List<GuildMember>> fetchMembers() async => _previewMembers;
 
   @override
+  Future<List<GuildMember>> fetchContentGroupRoster() async => _previewMembers;
+
+  @override
   Future<void> changeRole(int memberId, UserRole role) async {}
 
   @override

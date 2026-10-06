@@ -12,6 +12,7 @@ import '../../../app/theme/app_text_styles.dart';
 import '../../../app/theme/app_theme_palette.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../core/notifications/boss_schedule_voice.dart';
+import '../../../core/permissions/deputy_permission.dart';
 import '../../../core/permissions/role_guard.dart';
 import '../../../core/time/seoul_datetime.dart';
 import '../../../core/time/server_clock.dart';
@@ -23,6 +24,8 @@ import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/status_tag.dart';
 import '../../auth/application/auth_controller.dart';
 import '../../auth/domain/user_role.dart';
+import '../../characters/application/character_target_controller.dart';
+import '../../characters/presentation/character_target_selector.dart';
 import '../application/schedule_alert_service.dart';
 import '../application/schedule_controller.dart';
 import '../domain/boss_schedule.dart';
@@ -166,6 +169,15 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen>
   Widget build(BuildContext context) {
     final overviewState = ref.watch(scheduleControllerProvider);
     final session = ref.watch(authControllerProvider).value;
+    final selectedCharacterKey = ref.watch(selectedCharacterKeyProvider);
+    final selectedCharacterName = ref.watch(selectedCharacterNameProvider);
+    final targetCharacterKey = displayCharacterKey(
+      session,
+      selectedCharacterKey,
+    );
+    final targetNickname = session?.isDeputy == true
+        ? session?.activeCharacter?.displayName ?? session?.nickname ?? ''
+        : selectedCharacterName ?? session?.nickname ?? '';
     final role = session?.role ?? UserRole.unknown;
     final canOperateSchedules = RoleGuard.canOperateSchedules(role);
     final canManageSchedules = RoleGuard.canManageOperations(role);
@@ -220,12 +232,23 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen>
       body: overviewState.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (error, _) => ErrorView(
-          message: error is ApiException ? error.message : '일정을 불러오지 못했습니다.',
-          onRetry: ref.read(scheduleControllerProvider.notifier).refresh,
+          title: isDeputyFeatureForbidden(error) ? '권한 안내' : '문제가 발생했어요',
+          message: deputyPermissionMessage(error),
+          onRetry: isDeputyCharacterRequired(error)
+              ? () => context.go('/deputy/characters')
+              : isDeputyFeatureForbidden(error)
+              ? null
+              : ref.read(scheduleControllerProvider.notifier).refresh,
+          actionLabel: isDeputyCharacterRequired(error) ? '캐릭터 선택' : null,
+          onAction: isDeputyCharacterRequired(error)
+              ? () => context.go('/deputy/characters')
+              : null,
         ),
         data: (overview) => _buildScheduleList(
           overview,
-          nickname: session?.nickname ?? '',
+          nickname: targetNickname,
+          targetUserId: session?.effectiveUserId,
+          targetCharacterKey: targetCharacterKey,
           canOperateSchedules: canOperateSchedules,
         ),
       ),
@@ -252,6 +275,8 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen>
   Widget _buildScheduleList(
     ScheduleOverview overview, {
     required String nickname,
+    required int? targetUserId,
+    required String? targetCharacterKey,
     required bool canOperateSchedules,
   }) {
     final scheme = Theme.of(context).colorScheme;
@@ -405,6 +430,8 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen>
                       }).toList(),
                     ),
                   ),
+                  const SizedBox(height: AppSpacing.space3),
+                  const CharacterTargetSelector(),
                 ],
               ),
             ),
@@ -441,6 +468,8 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen>
                     nextSchedule: nextSchedule,
                     focusSchedule: focusSchedule,
                     nickname: nickname,
+                    targetUserId: targetUserId,
+                    targetCharacterKey: targetCharacterKey,
                     canOperateSchedules: canOperateSchedules,
                   ),
                 ),
@@ -518,6 +547,8 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen>
     required BossSchedule? nextSchedule,
     required BossSchedule? focusSchedule,
     required String nickname,
+    required int? targetUserId,
+    required String? targetCharacterKey,
     required bool canOperateSchedules,
   }) {
     final rows = <Widget>[];
@@ -543,6 +574,8 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen>
           schedule: schedule,
           overview: overview,
           nickname: nickname,
+          targetUserId: targetUserId,
+          targetCharacterKey: targetCharacterKey,
           now: now,
           compact: _compactView,
           emphasized: identical(schedule, nextSchedule),
@@ -551,6 +584,8 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen>
             schedule,
             overview,
             nickname: nickname,
+            targetUserId: targetUserId,
+            targetCharacterKey: targetCharacterKey,
             canOperateSchedules: canOperateSchedules,
           ),
           onParticipate: () => _participate(schedule),
@@ -611,10 +646,17 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen>
     BossSchedule schedule,
     ScheduleOverview overview, {
     required String nickname,
+    required int? targetUserId,
+    required String? targetCharacterKey,
     required bool canOperateSchedules,
   }) async {
     final participants = overview.participantsFor(schedule);
-    final joined = participants.contains(nickname);
+    final joined = overview.isJoined(
+      schedule,
+      nickname: nickname,
+      userId: targetUserId,
+      characterKey: targetCharacterKey,
+    );
     final isTarget = overview.isParticipationTarget(schedule);
     final closed = overview.closedVoteKeys.contains(schedule.voteKey);
     final isPast =
@@ -753,7 +795,11 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen>
       ).showSnackBar(SnackBar(content: Text(successMessage)));
     } catch (error) {
       if (!mounted) return;
-      final message = error is ApiException ? error.message : '요청을 처리하지 못했습니다.';
+      if (isDeputyCharacterRequired(error)) {
+        context.go('/deputy/characters');
+        return;
+      }
+      final message = deputyPermissionMessage(error);
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text(message)));
@@ -799,6 +845,8 @@ class _ScheduleCard extends StatelessWidget {
     required this.schedule,
     required this.overview,
     required this.nickname,
+    required this.targetUserId,
+    required this.targetCharacterKey,
     required this.now,
     required this.compact,
     required this.emphasized,
@@ -815,6 +863,8 @@ class _ScheduleCard extends StatelessWidget {
   final BossSchedule schedule;
   final ScheduleOverview overview;
   final String nickname;
+  final int? targetUserId;
+  final String? targetCharacterKey;
   final int now;
   final bool compact;
   final bool emphasized;
@@ -831,7 +881,12 @@ class _ScheduleCard extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final palette = context.appPalette;
     final participants = overview.participantsFor(schedule);
-    final joined = participants.contains(nickname);
+    final joined = overview.isJoined(
+      schedule,
+      nickname: nickname,
+      userId: targetUserId,
+      characterKey: targetCharacterKey,
+    );
     final isTarget = overview.isParticipationTarget(schedule);
     final closed = overview.closedVoteKeys.contains(schedule.voteKey);
     final isPast = schedule.spawnTime <= now;

@@ -29,6 +29,8 @@ class MoreScreen extends ConsumerWidget {
       '손지원',
       '요청과 지원 매칭',
       route: '/support',
+      deputyAllowed: true,
+      deputyPermission: 'SUPPORT_MATCHING',
     ),
     _MenuItem(
       Icons.inventory_2_outlined,
@@ -41,6 +43,8 @@ class MoreScreen extends ConsumerWidget {
       '콘텐츠 참여',
       '길드원 그룹 편성',
       route: '/content-groups',
+      deputyAllowed: true,
+      deputyPermission: 'CONTENT_PARTICIPATION_READ',
     ),
     _MenuItem(Icons.diamond_outlined, '공성전', '다이아 사용 현황', route: '/siege'),
   ];
@@ -60,6 +64,13 @@ class MoreScreen extends ConsumerWidget {
       route: '/settings',
       masterOnly: true,
     ),
+    _MenuItem(
+      Icons.badge_outlined,
+      '부주 계정',
+      '길드 공용 계정 관리',
+      route: '/deputy-accounts',
+      staffOnly: true,
+    ),
   ];
 
   @override
@@ -68,15 +79,30 @@ class MoreScreen extends ConsumerWidget {
     final nickname = session?.nickname.trim();
     final displayName = nickname == null || nickname.isEmpty ? '길드원' : nickname;
     final roleLabel = session?.role.label ?? '길드원';
+    final isDeputy = session?.isDeputy == true;
     final scheme = Theme.of(context).colorScheme;
     final palette = context.appPalette;
     final guildItems = _guild
         .where(
           (item) =>
-              !item.masterOnly ||
-              RoleGuard.canManageGuildSettings(
-                session?.role ?? UserRole.unknown,
-              ),
+              (!item.masterOnly ||
+                  RoleGuard.canManageGuildSettings(
+                    session?.role ?? UserRole.unknown,
+                  )) &&
+              (!item.staffOnly ||
+                  RoleGuard.canManageDeputyAccounts(
+                    session?.role ?? UserRole.unknown,
+                  )) &&
+              !isDeputy,
+        )
+        .toList();
+    final operationItems = _operations
+        .where(
+          (item) =>
+              (!isDeputy || item.deputyAllowed) &&
+              (session == null ||
+                  item.deputyPermission == null ||
+                  session.hasPermission(item.deputyPermission!)),
         )
         .toList();
 
@@ -93,7 +119,8 @@ class MoreScreen extends ConsumerWidget {
           AppCard(
             key: const ValueKey<String>('more-profile-summary'),
             emphasized: true,
-            onTap: () => context.push('/profile'),
+            onTap: () =>
+                context.push(isDeputy ? '/deputy/characters' : '/profile'),
             child: Row(
               children: <Widget>[
                 CircleAvatar(
@@ -110,15 +137,19 @@ class MoreScreen extends ConsumerWidget {
                       Text('$displayName님', style: AppTextStyles.cardTitle),
                       const SizedBox(height: AppSpacing.space1),
                       Text(
-                        '${session?.role.apiValue ?? 'MEMBER'} · $roleLabel',
+                        isDeputy
+                            ? 'DEPUTY · $roleLabel'
+                            : '${session?.role.apiValue ?? 'MEMBER'} · $roleLabel',
                         style: AppTextStyles.label,
                       ),
                     ],
                   ),
                 ),
                 IconButton(
-                  onPressed: () => context.push('/profile'),
-                  tooltip: '내 정보 열기',
+                  onPressed: () => context.push(
+                    isDeputy ? '/deputy/characters' : '/profile',
+                  ),
+                  tooltip: isDeputy ? '사용 캐릭터 변경' : '내 정보 열기',
                   icon: const Icon(Icons.chevron_right_rounded),
                 ),
               ],
@@ -127,7 +158,7 @@ class MoreScreen extends ConsumerWidget {
           const SizedBox(height: AppSpacing.space6),
           const Text('길드 운영', style: AppTextStyles.sectionTitle),
           const SizedBox(height: AppSpacing.space3),
-          _MenuGroup(items: _operations),
+          _MenuGroup(items: operationItems),
           const SizedBox(height: AppSpacing.space6),
           const Text('계정과 길드', style: AppTextStyles.sectionTitle),
           const SizedBox(height: AppSpacing.space3),
@@ -355,6 +386,9 @@ class _MenuItem {
     this.subtitle, {
     this.route,
     this.masterOnly = false,
+    this.staffOnly = false,
+    this.deputyAllowed = false,
+    this.deputyPermission,
   });
 
   final IconData icon;
@@ -362,4 +396,7 @@ class _MenuItem {
   final String subtitle;
   final String? route;
   final bool masterOnly;
+  final bool staffOnly;
+  final bool deputyAllowed;
+  final String? deputyPermission;
 }

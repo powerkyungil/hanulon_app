@@ -5,6 +5,8 @@ abstract final class RoleGuard {
     return role == UserRole.master || role == UserRole.admin;
   }
 
+  static bool isDeputy(UserRole role) => role == UserRole.deputy;
+
   static bool isMaster(UserRole role) => role == UserRole.master;
 
   static bool canManageOperations(UserRole role) => isStaff(role);
@@ -13,6 +15,14 @@ abstract final class RoleGuard {
     return role == UserRole.master ||
         role == UserRole.admin ||
         role == UserRole.member;
+  }
+
+  static bool canViewSchedules(UserRole role) {
+    return canOperateSchedules(role) || isDeputy(role);
+  }
+
+  static bool canParticipateSchedules(UserRole role) {
+    return canViewSchedules(role);
   }
 
   static bool canManageMemberRoles(UserRole role) => role == UserRole.master;
@@ -32,6 +42,15 @@ abstract final class RoleGuard {
   static bool canManageSiege(UserRole role) => isStaff(role);
 
   static bool canManageSupport(UserRole role) => isStaff(role);
+
+  static bool canUseSupport(UserRole role) {
+    return role == UserRole.master ||
+        role == UserRole.admin ||
+        role == UserRole.member ||
+        role == UserRole.deputy;
+  }
+
+  static bool canManageDeputyAccounts(UserRole role) => isStaff(role);
 
   static bool canEditCollectionStatus({
     required UserRole role,

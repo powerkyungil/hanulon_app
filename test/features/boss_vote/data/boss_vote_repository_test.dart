@@ -110,6 +110,80 @@ void main() {
     });
     expect(joined, isTrue);
   });
+
+  test('선택 캐릭터 조회와 대리 행위자 정보를 투표 모델에 보존한다', () async {
+    final requests = <RequestOptions>[];
+    final client = _client((options, handler) {
+      requests.add(options);
+      final response = options.method == 'GET'
+          ? <String, dynamic>{
+              'data': <Map<String, dynamic>>[
+                <String, dynamic>{
+                  'id': 9,
+                  'voteKey': '본섭|요툰하임|파르바|1786406400000',
+                  'type': '본섭',
+                  'region': '요툰하임',
+                  'boss': '파르바',
+                  'spawnTime': 1786406400000,
+                  'participants': <Map<String, dynamic>>[
+                    <String, dynamic>{
+                      'userId': 123,
+                      'nickname': '프레이야',
+                      'characterType': 'ALTERNATE',
+                      'characterKey': 'ALTERNATE:123',
+                      'characterName': '프레이야 부캐',
+                      'votedBy': <String, dynamic>{
+                        'accountType': 'DEPUTY',
+                        'accountId': null,
+                        'nickname': '공용 부주',
+                      },
+                    },
+                  ],
+                  'joined': true,
+                  'isClosed': false,
+                  'isBlessed': false,
+                  'isManual': false,
+                  'isHistory': false,
+                },
+              ],
+            }
+          : <String, dynamic>{
+              'data': <String, dynamic>{'joined': false},
+            };
+      handler.resolve(
+        Response<Object?>(
+          requestOptions: options,
+          statusCode: 200,
+          data: response,
+        ),
+      );
+    });
+
+    final repository = ApiBossVoteRepository(client);
+    final vote = (await repository.fetchVoteBossesForCharacter(
+      characterKey: 'ALTERNATE:123',
+    )).single;
+    final joined = await repository.toggleParticipationForCharacter(
+      vote,
+      characterKey: 'ALTERNATE:123',
+    );
+
+    final participant = vote.participants.single;
+    expect(requests[0].queryParameters, <String, dynamic>{
+      'characterKey': 'ALTERNATE:123',
+    });
+    expect(participant.characterKey, 'ALTERNATE:123');
+    expect(participant.targetDisplayName, '프레이야 부캐');
+    expect(participant.votedBy?.accountType, 'DEPUTY');
+    expect(participant.votedBy?.accountId, isNull);
+    expect(participant.votedBy?.nickname, '공용 부주');
+    expect(requests[1].data, <String, dynamic>{
+      'boss': '파르바',
+      'spawnTime': 1786406400000,
+      'characterKey': 'ALTERNATE:123',
+    });
+    expect(joined, isFalse);
+  });
 }
 
 ApiClient _client(

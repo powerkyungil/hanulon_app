@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../app/theme/app_spacing.dart';
 import '../../../app/theme/app_text_styles.dart';
 import '../../../app/theme/app_theme_palette.dart';
-import '../../../core/network/api_exception.dart';
+import '../../../core/permissions/deputy_permission.dart';
 import '../../../core/permissions/role_guard.dart';
 import '../../../core/widgets/app_card.dart';
 import '../../../core/widgets/confirm_dialog.dart';
@@ -68,10 +69,17 @@ class _ContentGroupsScreenState extends ConsumerState<ContentGroupsScreen> {
       body: overviewState.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (error, _) => ErrorView(
-          message: error is ApiException
-              ? error.message
-              : '콘텐츠 그룹을 불러오지 못했습니다.',
-          onRetry: () => ref.invalidate(contentGroupOverviewProvider),
+          title: isDeputyFeatureForbidden(error) ? '권한 안내' : '문제가 발생했어요',
+          message: deputyPermissionMessage(error),
+          onRetry: isDeputyCharacterRequired(error)
+              ? () => context.go('/deputy/characters')
+              : isDeputyFeatureForbidden(error)
+              ? null
+              : () => ref.invalidate(contentGroupOverviewProvider),
+          actionLabel: isDeputyCharacterRequired(error) ? '캐릭터 선택' : null,
+          onAction: isDeputyCharacterRequired(error)
+              ? () => context.go('/deputy/characters')
+              : null,
         ),
         data: (overview) => LayoutBuilder(
           builder: (context, constraints) {
@@ -593,7 +601,12 @@ class _ContentGroupsScreenState extends ConsumerState<ContentGroupsScreen> {
       await action();
       if (mounted) _showMessage(successMessage);
     } catch (error) {
-      if (mounted) _showMessage(_messageFor(error), isError: true);
+      if (!mounted) return;
+      if (isDeputyCharacterRequired(error)) {
+        context.go('/deputy/characters');
+        return;
+      }
+      _showMessage(_messageFor(error), isError: true);
     } finally {
       if (mounted) setState(() => _isMutating = false);
     }
@@ -609,7 +622,7 @@ class _ContentGroupsScreenState extends ConsumerState<ContentGroupsScreen> {
   }
 
   static String _messageFor(Object error) {
-    return error is ApiException ? error.message : '요청을 처리하지 못했습니다.';
+    return deputyPermissionMessage(error);
   }
 }
 

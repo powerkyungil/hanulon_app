@@ -1,5 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../auth/application/auth_controller.dart';
+import '../../characters/application/character_target_controller.dart';
 import '../../boss_vote/application/boss_vote_controller.dart';
 import '../data/schedule_repository.dart';
 import '../domain/boss_schedule.dart';
@@ -9,13 +11,27 @@ import '../domain/schedule_overview.dart';
 class ScheduleController extends AsyncNotifier<ScheduleOverview> {
   @override
   Future<ScheduleOverview> build() {
-    return ref.read(scheduleRepositoryProvider).fetchOverview();
+    final session = ref.watch(authControllerProvider).value;
+    final selectedKey = ref.watch(selectedCharacterKeyProvider);
+    final characterKey = requestedCharacterKey(session, selectedKey);
+    final repository = ref.read(scheduleRepositoryProvider);
+    if (repository case final CharacterAwareScheduleRepository aware) {
+      return aware.fetchOverviewForCharacter(characterKey: characterKey);
+    }
+    return repository.fetchOverview();
   }
 
   Future<void> refresh() async {
-    state = await AsyncValue.guard(
-      ref.read(scheduleRepositoryProvider).fetchOverview,
-    );
+    state = await AsyncValue.guard(() async {
+      final session = ref.read(authControllerProvider).value;
+      final selectedKey = ref.read(selectedCharacterKeyProvider);
+      final characterKey = requestedCharacterKey(session, selectedKey);
+      final repository = ref.read(scheduleRepositoryProvider);
+      if (repository case final CharacterAwareScheduleRepository aware) {
+        return aware.fetchOverviewForCharacter(characterKey: characterKey);
+      }
+      return repository.fetchOverview();
+    });
   }
 
   Future<void> cut(BossSchedule schedule) async {
@@ -90,9 +106,18 @@ class ScheduleController extends AsyncNotifier<ScheduleOverview> {
   }
 
   Future<bool> toggleParticipation(BossSchedule schedule) async {
-    final joined = await ref
-        .read(scheduleRepositoryProvider)
-        .toggleParticipation(schedule);
+    final session = ref.read(authControllerProvider).value;
+    final selectedKey = ref.read(selectedCharacterKeyProvider);
+    final characterKey = requestedCharacterKey(session, selectedKey);
+    final repository = ref.read(scheduleRepositoryProvider);
+    final joined = switch (repository) {
+      final CharacterAwareScheduleRepository aware =>
+        await aware.toggleParticipationForCharacter(
+          schedule,
+          characterKey: characterKey,
+        ),
+      _ => await repository.toggleParticipation(schedule),
+    };
     await refresh();
     return joined;
   }

@@ -30,8 +30,14 @@ class ApiException implements Exception {
         ? responseData
         : null;
     final nestedError = responseJson?['error'];
+    final envelopeData = responseJson?['data'];
+    final nestedEnvelopeError = envelopeData is Map<String, dynamic>
+        ? envelopeData['error']
+        : null;
     final errorJson = nestedError is Map<String, dynamic>
         ? nestedError
+        : nestedEnvelopeError is Map<String, dynamic>
+        ? nestedEnvelopeError
         : responseJson;
     final responseMessage = errorJson?['message'] ?? errorJson?['error'];
     final message = responseMessage is String && responseMessage.isNotEmpty

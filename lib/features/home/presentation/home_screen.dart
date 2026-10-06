@@ -7,6 +7,7 @@ import '../../../app/theme/app_radii.dart';
 import '../../../app/theme/app_spacing.dart';
 import '../../../app/theme/app_text_styles.dart';
 import '../../../app/theme/app_theme_palette.dart';
+import '../../../core/permissions/deputy_permission.dart';
 import '../../../core/time/seoul_datetime.dart';
 import '../../../core/time/server_clock.dart';
 import '../../../core/widgets/app_button.dart';
@@ -28,19 +29,40 @@ class HomeScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final session = ref.watch(authControllerProvider).value;
+    final isDeputy = session?.isDeputy == true;
     final nickname = ref.watch(
       authControllerProvider.select(
         (state) => state.value?.nickname.trim() ?? '',
       ),
     );
-    final guildName = ref.watch(
-      settingsControllerProvider.select(
-        (state) => state.value?.guildName.trim() ?? '',
-      ),
-    );
+    final guildName = isDeputy
+        ? ''
+        : ref.watch(
+            settingsControllerProvider.select(
+              (state) => state.value?.guildName.trim() ?? '',
+            ),
+          );
     final scheduleState = ref.watch(scheduleControllerProvider);
     final voteState = ref.watch(bossVoteControllerProvider);
-    final noticeState = ref.watch(noticeOverviewProvider);
+
+    ref.listen(scheduleControllerProvider, (previous, next) {
+      final error = next.error;
+      if (error != null &&
+          isDeputyCharacterRequired(error) &&
+          context.mounted) {
+        context.go('/deputy/characters');
+      }
+    });
+    ref.listen(bossVoteControllerProvider, (previous, next) {
+      final error = next.error;
+      if (error != null &&
+          isDeputyCharacterRequired(error) &&
+          context.mounted) {
+        context.go('/deputy/characters');
+      }
+    });
+
+    final noticeState = isDeputy ? null : ref.watch(noticeOverviewProvider);
     final clock = ref.watch(serverClockProvider);
     final now = clock.now();
     final greetingName = nickname.isEmpty ? '길드원' : nickname;
@@ -57,7 +79,7 @@ class HomeScreen extends ConsumerWidget {
             ?.where((item) => _dateKey(item.spawnTime) == todayKey)
             .length ??
         0;
-    final firstNotice = noticeState.value?.rules.firstOrNull;
+    final firstNotice = noticeState?.value?.rules.firstOrNull;
     final dateLabel = DateFormat('M월 d일').format(now);
     final role = session?.role;
 
@@ -66,8 +88,10 @@ class HomeScreen extends ConsumerWidget {
         bottom: false,
         child: RefreshIndicator(
           onRefresh: () async {
-            ref.invalidate(noticeOverviewProvider);
-            ref.invalidate(settingsControllerProvider);
+            if (!isDeputy) {
+              ref.invalidate(noticeOverviewProvider);
+              ref.invalidate(settingsControllerProvider);
+            }
             await Future.wait<void>(<Future<void>>[
               ref.read(scheduleControllerProvider.notifier).refresh(),
               ref.read(bossVoteControllerProvider.notifier).refresh(),
@@ -122,17 +146,19 @@ class HomeScreen extends ConsumerWidget {
                   ),
                 ],
               ),
-              const SizedBox(height: AppSpacing.space6),
-              _SectionHeader(
-                title: '공지사항',
-                actionLabel: '전체보기',
-                onAction: () => context.push('/notices'),
-              ),
-              const SizedBox(height: AppSpacing.space2),
-              _NoticeCard(
-                notice: firstNotice,
-                onTap: () => context.push('/notices'),
-              ),
+              if (!isDeputy) ...<Widget>[
+                const SizedBox(height: AppSpacing.space6),
+                _SectionHeader(
+                  title: '공지사항',
+                  actionLabel: '전체보기',
+                  onAction: () => context.push('/notices'),
+                ),
+                const SizedBox(height: AppSpacing.space2),
+                _NoticeCard(
+                  notice: firstNotice,
+                  onTap: () => context.push('/notices'),
+                ),
+              ],
             ],
           ),
         ),

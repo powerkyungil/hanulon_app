@@ -12,6 +12,7 @@ import '../domain/boss_definition.dart';
 import '../domain/fixed_schedule_builder.dart';
 import '../domain/ocr_result.dart';
 import '../domain/schedule_overview.dart';
+import '../domain/schedule_participant.dart';
 
 abstract interface class ScheduleRepository {
   Future<ScheduleOverview> fetchOverview();
@@ -49,14 +50,31 @@ abstract interface class ScheduleRepository {
   Future<bool> toggleParticipation(BossSchedule schedule);
 }
 
-class ApiScheduleRepository implements ScheduleRepository {
+abstract interface class CharacterAwareScheduleRepository {
+  Future<ScheduleOverview> fetchOverviewForCharacter({String? characterKey});
+
+  Future<bool> toggleParticipationForCharacter(
+    BossSchedule schedule, {
+    String? characterKey,
+  });
+}
+
+class ApiScheduleRepository
+    implements ScheduleRepository, CharacterAwareScheduleRepository {
   const ApiScheduleRepository(this._apiClient, this._clock);
 
   final ApiClient _apiClient;
   final ServerClock _clock;
 
   @override
-  Future<ScheduleOverview> fetchOverview() async {
+  Future<ScheduleOverview> fetchOverview() => fetchOverviewForCharacter();
+
+  @override
+  Future<ScheduleOverview> fetchOverviewForCharacter({String? characterKey}) {
+    return _fetchOverview(characterKey: characterKey);
+  }
+
+  Future<ScheduleOverview> _fetchOverview({String? characterKey}) async {
     final responses = await Future.wait<Object>(<Future<Object>>[
       _apiClient.get<List<BossSchedule>>(
         ApiPaths.schedules,
@@ -66,7 +84,7 @@ class ApiScheduleRepository implements ScheduleRepository {
         ApiPaths.participationTargets,
         decode: _decodeParticipationTargets,
       ),
-      _apiClient.get<Map<String, List<String>>>(
+      _apiClient.get<_ScheduleParticipantResponse>(
         ApiPaths.participants,
         decode: _decodeParticipants,
       ),
@@ -101,15 +119,17 @@ class ApiScheduleRepository implements ScheduleRepository {
       if (!alreadyExists) schedules.add(fixed);
     }
     schedules.sort((a, b) => a.spawnTime.compareTo(b.spawnTime));
+    final participantResponse = responses[2] as _ScheduleParticipantResponse;
     return ScheduleOverview(
       schedules: schedules,
       participationTargetBossDefinitionIds:
           (responses[1] as _ParticipationTargetResponse).resolveIds(
             definitions,
           ),
-      participantsByVoteKey: responses[2] as Map<String, List<String>>,
+      participantsByVoteKey: participantResponse.namesByVoteKey,
       closedVoteKeys: responses[3] as Set<String>,
       synchronizedAt: _clock.now(),
+      participantDetailsByVoteKey: participantResponse.detailsByVoteKey,
     );
   }
 
@@ -298,12 +318,21 @@ class ApiScheduleRepository implements ScheduleRepository {
 
   @override
   Future<bool> toggleParticipation(BossSchedule schedule) {
+    return toggleParticipationForCharacter(schedule);
+  }
+
+  @override
+  Future<bool> toggleParticipationForCharacter(
+    BossSchedule schedule, {
+    String? characterKey,
+  }) {
     return _apiClient.put<bool>(
       '${ApiPaths.participants}/${Uri.encodeComponent(schedule.boss)}',
       data: <String, dynamic>{
         'type': schedule.type,
         'region': schedule.region,
         'spawnTime': schedule.spawnTime,
+        if (characterKey != null) 'characterKey': characterKey,
       },
       decode: (data) {
         final json = _asJson(data);
@@ -407,15 +436,50 @@ class ApiScheduleRepository implements ScheduleRepository {
     }
   }
 
-  static Map<String, List<String>> _decodeParticipants(Object? data) {
+  static _ScheduleParticipantResponse _decodeParticipants(Object? data) {
     final payload = _envelopeData(data);
     final json = _asJson(payload);
-    return json.map((key, value) {
-      final names = value is List<dynamic>
-          ? value.map((name) => name.toString()).toList()
-          : <String>[];
-      return MapEntry<String, List<String>>(key, names);
-    });
+    final namesByVoteKey = <String, List<String>>{};
+    final detailsByVoteKey = <String, List<ScheduleParticipant>>{};
+    for (final entry in json.entries) {
+      final names = <String>[];
+      final details = <ScheduleParticipant>[];
+      final values = entry.value is List<dynamic>
+          ? entry.value as List<dynamic>
+          : const <dynamic>[];
+      for (final value in values) {
+        if (value is Map<String, dynamic>) {
+          final participant = ScheduleParticipant(
+            userId: _optionalInt(value['userId'] ?? value['user_id']),
+            nickname: value['nickname']?.toString() ?? '',
+            characterType: _nullableString(
+              value['characterType'] ?? value['character_type'],
+            ),
+            characterKey: _nullableString(
+              value['characterKey'] ?? value['character_key'],
+            ),
+            characterName: _nullableString(
+              value['characterName'] ??
+                  value['character_name'] ??
+                  value['targetCharacterName'] ??
+                  value['target_character_name'],
+            ),
+          );
+          details.add(participant);
+          names.add(participant.displayName);
+        } else {
+          final nickname = value.toString();
+          details.add(ScheduleParticipant(userId: null, nickname: nickname));
+          names.add(nickname);
+        }
+      }
+      namesByVoteKey[entry.key] = names;
+      detailsByVoteKey[entry.key] = details;
+    }
+    return _ScheduleParticipantResponse(
+      namesByVoteKey: namesByVoteKey,
+      detailsByVoteKey: detailsByVoteKey,
+    );
   }
 
   static Map<String, dynamic> _asJson(Object? data) {
@@ -456,6 +520,21 @@ class ApiScheduleRepository implements ScheduleRepository {
     if (value is num) return value.toDouble();
     return double.tryParse(value?.toString() ?? '');
   }
+
+  static String? _nullableString(Object? value) {
+    final text = value?.toString().trim() ?? '';
+    return text.isEmpty ? null : text;
+  }
+}
+
+class _ScheduleParticipantResponse {
+  const _ScheduleParticipantResponse({
+    required this.namesByVoteKey,
+    required this.detailsByVoteKey,
+  });
+
+  final Map<String, List<String>> namesByVoteKey;
+  final Map<String, List<ScheduleParticipant>> detailsByVoteKey;
 }
 
 class _ParticipationTargetResponse {

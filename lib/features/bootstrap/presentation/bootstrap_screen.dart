@@ -32,7 +32,13 @@ class _BootstrapScreenState extends ConsumerState<BootstrapScreen> {
           .read(authControllerProvider.notifier)
           .restoreSession();
       if (!mounted) return;
-      context.go(session == null ? '/login' : '/home');
+      if (session == null) {
+        context.go('/login');
+      } else if (session.isDeputy && session.activeCharacter == null) {
+        context.go('/deputy/characters');
+      } else {
+        context.go('/home');
+      }
     } catch (error) {
       if (!mounted) return;
       setState(() => _error = error);

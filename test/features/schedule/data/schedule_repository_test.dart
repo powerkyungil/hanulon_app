@@ -227,6 +227,77 @@ void main() {
     );
     expect(joined, isTrue);
   });
+
+  test('선택 캐릭터 일정 조회와 참여 토글에 characterKey를 전달한다', () async {
+    final requests = <RequestOptions>[];
+    final client = _client((options, handler) {
+      requests.add(options);
+      final data = switch (options.path) {
+        '/api/v1/schedules' => <String, dynamic>{'data': <dynamic>[]},
+        '/api/v1/participation-targets' => <String, dynamic>{
+          'data': <String, dynamic>{'bossDefinitionIds': <int>[]},
+        },
+        '/api/v1/participants' => <String, dynamic>{
+          'data': <String, dynamic>{
+            '본섭|요툰하임|파르바|1786406400000': <Map<String, dynamic>>[
+              <String, dynamic>{
+                'userId': 123,
+                'nickname': '프레이야',
+                'characterType': 'ALTERNATE',
+                'characterKey': 'ALTERNATE:123',
+                'characterName': '프레이야 부캐',
+              },
+            ],
+          },
+        },
+        '/api/v1/participation-states' => <String, dynamic>{'data': <String>[]},
+        '/api/v1/time' => <String, dynamic>{
+          'data': <String, dynamic>{'epochMs': 1786406400000},
+        },
+        '/api/v1/bosses' => <String, dynamic>{'data': <dynamic>[]},
+        _ when options.path.startsWith('/api/v1/participants/') =>
+          <String, dynamic>{
+            'data': <String, dynamic>{'joined': true},
+          },
+        _ => throw StateError('예상하지 못한 경로: ${options.path}'),
+      };
+      handler.resolve(
+        Response<Object?>(requestOptions: options, statusCode: 200, data: data),
+      );
+    });
+
+    final repository = ApiScheduleRepository(client, ServerClock());
+    final overview = await repository.fetchOverviewForCharacter(
+      characterKey: 'ALTERNATE:123',
+    );
+    final schedule = const BossSchedule(
+      id: 7,
+      bossDefinitionId: 3,
+      type: '본섭',
+      region: '요툰하임',
+      boss: '파르바',
+      spawnTime: 1786406400000,
+      isMung: false,
+    );
+    final joined = await repository.toggleParticipationForCharacter(
+      schedule,
+      characterKey: 'ALTERNATE:123',
+    );
+
+    expect(requests[2].queryParameters, isEmpty);
+    expect(requests[3].queryParameters, isEmpty);
+    expect(
+      overview.participantDetailsFor(schedule).single.characterKey,
+      'ALTERNATE:123',
+    );
+    expect(requests.last.data, <String, dynamic>{
+      'type': '본섭',
+      'region': '요툰하임',
+      'spawnTime': 1786406400000,
+      'characterKey': 'ALTERNATE:123',
+    });
+    expect(joined, isTrue);
+  });
 }
 
 ApiClient _client(

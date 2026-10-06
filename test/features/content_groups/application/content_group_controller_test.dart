@@ -110,6 +110,9 @@ class _FakeMemberRepository implements MemberRepository {
   ];
 
   @override
+  Future<List<GuildMember>> fetchContentGroupRoster() => fetchMembers();
+
+  @override
   Future<void> changeRole(int memberId, UserRole role) async {}
 
   @override

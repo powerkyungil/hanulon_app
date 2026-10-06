@@ -13,6 +13,16 @@ void main() {
       expect(RoleGuard.canManageOperations(UserRole.member), isFalse);
     });
 
+    test('부주 계정은 참여 기능만 사용하고 운영 기능은 관리할 수 없다', () {
+      expect(RoleGuard.isDeputy(UserRole.deputy), isTrue);
+      expect(RoleGuard.canViewSchedules(UserRole.deputy), isTrue);
+      expect(RoleGuard.canParticipateSchedules(UserRole.deputy), isTrue);
+      expect(RoleGuard.canUseSupport(UserRole.deputy), isTrue);
+      expect(RoleGuard.canManageOperations(UserRole.deputy), isFalse);
+      expect(RoleGuard.canManageContentGroups(UserRole.deputy), isFalse);
+      expect(RoleGuard.canManageDeputyAccounts(UserRole.deputy), isFalse);
+    });
+
     test('모든 활성 길드원은 보스 일정을 등록하고 처리할 수 있다', () {
       expect(RoleGuard.canOperateSchedules(UserRole.master), isTrue);
       expect(RoleGuard.canOperateSchedules(UserRole.admin), isTrue);

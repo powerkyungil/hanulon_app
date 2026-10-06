@@ -13,6 +13,8 @@ import '../domain/member_equipment.dart';
 abstract interface class MemberRepository {
   Future<List<GuildMember>> fetchMembers();
 
+  Future<List<GuildMember>> fetchContentGroupRoster();
+
   Future<void> changeRole(int memberId, UserRole role);
 
   Future<void> transferGuildMaster(int memberId);
@@ -37,6 +39,17 @@ class ApiMemberRepository implements MemberRepository {
             .where((member) => member.nickname.trim().isNotEmpty)
             .toList();
       },
+    );
+  }
+
+  @override
+  Future<List<GuildMember>> fetchContentGroupRoster() {
+    return _apiClient.get<List<GuildMember>>(
+      ApiPaths.contentGroupRoster,
+      decode: (data) => _memberList(data)
+          .map(_decodeMember)
+          .where((member) => member.nickname.trim().isNotEmpty)
+          .toList(),
     );
   }
 

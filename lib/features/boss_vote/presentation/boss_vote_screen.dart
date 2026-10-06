@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../../app/theme/app_radii.dart';
@@ -7,6 +8,7 @@ import '../../../app/theme/app_spacing.dart';
 import '../../../app/theme/app_text_styles.dart';
 import '../../../app/theme/app_theme_palette.dart';
 import '../../../core/network/api_exception.dart';
+import '../../../core/permissions/deputy_permission.dart';
 import '../../../core/permissions/role_guard.dart';
 import '../../../core/time/seoul_datetime.dart';
 import '../../../core/time/server_clock.dart';
@@ -18,9 +20,11 @@ import '../../../core/widgets/app_text_field.dart';
 import '../../../core/widgets/status_tag.dart';
 import '../../auth/application/auth_controller.dart';
 import '../../auth/domain/user_role.dart';
+import '../../characters/presentation/character_target_selector.dart';
 import '../application/boss_vote_controller.dart';
 import '../domain/manual_vote_input.dart';
 import '../domain/vote_boss.dart';
+import '../domain/vote_participant.dart';
 
 enum _VoteDay { today, tomorrow, past }
 
@@ -57,8 +61,17 @@ class _BossVoteScreenState extends ConsumerState<BossVoteScreen> {
       body: state.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (error, _) => ErrorView(
-          message: error is ApiException ? error.message : '투표 목록을 불러오지 못했습니다.',
-          onRetry: ref.read(bossVoteControllerProvider.notifier).refresh,
+          title: isDeputyFeatureForbidden(error) ? '권한 안내' : '문제가 발생했어요',
+          message: deputyPermissionMessage(error),
+          onRetry: isDeputyCharacterRequired(error)
+              ? () => context.push('/deputy/characters')
+              : isDeputyFeatureForbidden(error)
+              ? null
+              : ref.read(bossVoteControllerProvider.notifier).refresh,
+          actionLabel: isDeputyCharacterRequired(error) ? '캐릭터 선택' : null,
+          onAction: isDeputyCharacterRequired(error)
+              ? () => context.push('/deputy/characters')
+              : null,
         ),
         data: _buildList,
       ),
@@ -119,6 +132,8 @@ class _BossVoteScreenState extends ConsumerState<BossVoteScreen> {
             showSelectedIcon: false,
           ),
           const SizedBox(height: AppSpacing.space5),
+          const CharacterTargetSelector(),
+          const SizedBox(height: AppSpacing.space5),
           if (items.isEmpty)
             const Padding(
               padding: EdgeInsets.only(top: AppSpacing.space8),
@@ -177,8 +192,12 @@ class _BossVoteScreenState extends ConsumerState<BossVoteScreen> {
       );
     } catch (error) {
       if (!mounted) return;
+      if (isDeputyCharacterRequired(error)) {
+        context.push('/deputy/characters');
+        return;
+      }
       final message = error is ApiException
-          ? error.message
+          ? deputyPermissionMessage(error)
           : '참여 상태를 변경하지 못했습니다.';
       ScaffoldMessenger.of(
         context,
@@ -291,9 +310,9 @@ class _ParticipantsSheet extends StatelessWidget {
                           final participant = participants[index];
                           return _ParticipantTile(
                             key: ValueKey<String>(
-                              'vote-participant-${item.voteKey}-${participant.userId}',
+                              'vote-participant-${item.voteKey}-${participant.characterKey ?? participant.userId}',
                             ),
-                            nickname: participant.nickname,
+                            participant: participant,
                           );
                         },
                       );
@@ -358,15 +377,16 @@ class _EmptyParticipants extends StatelessWidget {
 }
 
 class _ParticipantTile extends StatelessWidget {
-  const _ParticipantTile({required this.nickname, super.key});
+  const _ParticipantTile({required this.participant, super.key});
 
-  final String nickname;
+  final VoteParticipant participant;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final palette = context.appPalette;
-    final trimmedNickname = nickname.trim();
+    final trimmedNickname = participant.targetDisplayName.trim();
+    final actor = participant.votedBy;
     final initial = trimmedNickname.isEmpty
         ? '?'
         : trimmedNickname.substring(0, 1);
@@ -394,14 +414,30 @@ class _ParticipantTile extends StatelessWidget {
             ),
             const SizedBox(width: AppSpacing.space2),
             Expanded(
-              child: Text(
-                trimmedNickname.isEmpty ? '이름 없음' : trimmedNickname,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: AppTextStyles.label.copyWith(
-                  color: scheme.onSurface,
-                  fontWeight: FontWeight.w600,
-                ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    '대상 · ${trimmedNickname.isEmpty ? '이름 없음' : trimmedNickname}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppTextStyles.label.copyWith(
+                      color: scheme.onSurface,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    actor == null
+                        ? '직접 투표'
+                        : '대신 투표한 계정 · ${actor.nickname.isEmpty ? actor.label : actor.nickname}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppTextStyles.caption.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
               ),
             ),
           ],

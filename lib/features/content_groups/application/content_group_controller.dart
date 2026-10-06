@@ -12,7 +12,7 @@ class ContentGroupController extends AsyncNotifier<ContentGroupOverview> {
   Future<ContentGroupOverview> _fetchOverview() async {
     final result = await Future.wait<Object>(<Future<Object>>[
       ref.read(contentGroupRepositoryProvider).fetchGroups(),
-      ref.read(memberRepositoryProvider).fetchMembers(),
+      ref.read(memberRepositoryProvider).fetchContentGroupRoster(),
     ]);
     return ContentGroupOverview(
       groups: result[0] as List<ContentGroup>,

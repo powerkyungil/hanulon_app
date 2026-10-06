@@ -237,6 +237,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                     ),
                                     label: const Text('처음이신가요? 회원가입'),
                                   ),
+                                  TextButton.icon(
+                                    onPressed: () =>
+                                        context.push('/deputy-login'),
+                                    icon: const Icon(Icons.badge_outlined),
+                                    label: const Text('부주 계정으로 로그인'),
+                                  ),
                                   const PrivacyPolicyButton(),
                                 ],
                               ),

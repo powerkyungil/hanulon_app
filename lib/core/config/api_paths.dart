@@ -1,5 +1,13 @@
 abstract final class ApiPaths {
   static const login = '/api/v1/auth/login';
+  static const deputyLogin = '/api/v1/deputy-auth/login';
+  static const deputyAccounts = '/api/v1/deputy-accounts';
+  static String deputyAccountPassword(int id) =>
+      '/api/v1/deputy-accounts/$id/password';
+  static String deputyAccountActive(int id) =>
+      '/api/v1/deputy-accounts/$id/active';
+  static const deputyCharacters = '/api/v1/deputy/characters';
+  static const deputyActiveCharacter = '/api/v1/deputy/active-character';
   static const register = '/api/v1/auth/register';
   static const pushTokens = '/api/v1/push-tokens';
   static const me = '/api/users/me';
@@ -77,6 +85,7 @@ abstract final class ApiPaths {
   static const legacyExcludedMembers = '/api/excluded-members';
   static const legacyToggleExcludedMember = '/api/excluded-members/toggle';
   static const contentGroups = '/api/v1/content-groups';
+  static const contentGroupRoster = '/api/v1/content-groups/roster';
   static String contentGroup(int id) => '/api/v1/content-groups/$id';
   static String contentGroupMembers(int id) =>
       '/api/v1/content-groups/$id/members';

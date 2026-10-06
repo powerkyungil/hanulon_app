@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:odin_guild_app/core/storage/session_metadata_storage.dart';
 import 'package:odin_guild_app/core/storage/token_storage.dart';
 import 'package:odin_guild_app/features/auth/application/auth_controller.dart';
 import 'package:odin_guild_app/features/auth/data/auth_repository.dart';
@@ -11,6 +12,9 @@ import 'package:odin_guild_app/features/auth/domain/profile_settings.dart';
 import 'package:odin_guild_app/features/auth/domain/registration_request.dart';
 import 'package:odin_guild_app/features/auth/domain/user_profile.dart';
 import 'package:odin_guild_app/features/auth/domain/user_role.dart';
+import 'package:odin_guild_app/features/deputy/data/deputy_auth_repository.dart';
+import 'package:odin_guild_app/features/deputy/domain/deputy_account.dart';
+import 'package:odin_guild_app/features/deputy/domain/deputy_character.dart';
 import 'package:odin_guild_app/features/push_notifications/application/push_notification_service.dart';
 
 void main() {
@@ -65,6 +69,78 @@ void main() {
       expect(session?.nickname, '프레이야');
       expect(session?.accessToken, storage.token);
       expect(pushLifecycle.registrationCount, 1);
+    });
+
+    test('부주 로그인 후 캐릭터 선택을 별도 세션으로 저장한다', () async {
+      final storage = _FakeTokenStorage();
+      final deputyRepository = _FakeDeputyAuthRepository();
+      final metadataStorage = _FakeSessionMetadataStorage();
+      final container = _createContainer(
+        storage,
+        _FakeAuthRepository(),
+        deputyRepository: deputyRepository,
+        metadataStorage: metadataStorage,
+      );
+      addTearDown(container.dispose);
+      await container.read(authControllerProvider.future);
+
+      final session = await container
+          .read(authControllerProvider.notifier)
+          .loginAsDeputy(
+            username: 'shared-deputy',
+            password: 'password',
+            autoLogin: true,
+          );
+
+      expect(session.isDeputy, isTrue);
+      expect(session.activeCharacter, isNull);
+      expect(storage.token, 'deputy-token');
+      expect(storage.persist, isTrue);
+      expect(metadataStorage.value?.isDeputy, isTrue);
+
+      final selected = await container
+          .read(authControllerProvider.notifier)
+          .selectDeputyCharacter('MAIN:7');
+
+      expect(selected?.characterKey, 'MAIN:7');
+      expect(
+        container.read(authControllerProvider).value?.activeCharacterKey,
+        'MAIN:7',
+      );
+      expect(deputyRepository.updatedCharacterKey, 'MAIN:7');
+    });
+
+    test('부주 토큰 복원 시 서버의 현재 캐릭터를 다시 조회한다', () async {
+      final storage = _FakeTokenStorage()
+        ..token = _tokenWithClaims(
+          userId: 0,
+          username: 'shared-deputy',
+          nickname: '공용 부주',
+          role: 'DEPUTY',
+          extraClaims: <String, dynamic>{
+            'principalType': 'DEPUTY',
+            'deputyId': 4,
+            'guildId': 9,
+          },
+        );
+      final deputyRepository = _FakeDeputyAuthRepository()
+        ..activeCharacter = _character('ALTERNATE:7');
+      final container = _createContainer(
+        storage,
+        _FakeAuthRepository(),
+        deputyRepository: deputyRepository,
+        metadataStorage: _FakeSessionMetadataStorage(),
+      );
+      addTearDown(container.dispose);
+      await container.read(authControllerProvider.future);
+
+      final session = await container
+          .read(authControllerProvider.notifier)
+          .restoreSession();
+
+      expect(session?.isDeputy, isTrue);
+      expect(session?.activeCharacterKey, 'ALTERNATE:7');
+      expect(deputyRepository.fetchActiveCharacterCount, 1);
     });
 
     test('세션 복원 시 JWT의 로그인 아이디를 읽기 전용 표시값으로 사용한다', () async {
@@ -165,6 +241,7 @@ String _tokenWithClaims({
   required String username,
   required String nickname,
   required String role,
+  Map<String, dynamic>? extraClaims,
 }) {
   final payload = base64Url
       .encode(
@@ -179,6 +256,7 @@ String _tokenWithClaims({
                     .add(const Duration(hours: 1))
                     .millisecondsSinceEpoch ~/
                 1000,
+            ...?extraClaims,
           }),
         ),
       )
@@ -190,11 +268,17 @@ ProviderContainer _createContainer(
   TokenStorage storage,
   AuthRepository repository, {
   PushTokenLifecycle? pushLifecycle,
+  DeputyAuthRepository? deputyRepository,
+  SessionMetadataStorage? metadataStorage,
 }) {
   return ProviderContainer(
     overrides: [
       tokenStorageProvider.overrideWithValue(storage),
       authRepositoryProvider.overrideWithValue(repository),
+      if (deputyRepository != null)
+        deputyAuthRepositoryProvider.overrideWithValue(deputyRepository),
+      if (metadataStorage != null)
+        sessionMetadataStorageProvider.overrideWithValue(metadataStorage),
       pushTokenLifecycleProvider.overrideWithValue(
         pushLifecycle ?? _FakePushTokenLifecycle(),
       ),
@@ -271,4 +355,90 @@ class _FakeAuthRepository implements AuthRepository {
 
   @override
   Future<void> updateMe(ProfileUpdateRequest request) async {}
+}
+
+DeputyCharacter _character(String key) {
+  final isAlternate = key.startsWith('ALTERNATE:');
+  return DeputyCharacter(
+    characterKey: key,
+    characterType: isAlternate ? 'ALTERNATE' : 'MAIN',
+    ownerUserId: 7,
+    ownerNickname: '프레이야',
+    characterName: isAlternate ? '프레이야 부캐' : '프레이야',
+    mainClass: '헌트리스',
+    combatPower: 321000,
+  );
+}
+
+class _FakeDeputyAuthRepository implements DeputyAuthRepository {
+  DeputyCharacter? activeCharacter;
+  String? updatedCharacterKey;
+  int fetchActiveCharacterCount = 0;
+
+  @override
+  Future<Session> login({
+    required String username,
+    required String password,
+  }) async {
+    return Session(
+      accessToken: 'deputy-token',
+      userId: 0,
+      username: username,
+      nickname: '공용 부주',
+      role: UserRole.deputy,
+      principalType: SessionPrincipalType.deputy,
+      deputyId: 4,
+      guildId: 9,
+      activeCharacter: activeCharacter,
+      permissions: const <String>['VOTE_PARTICIPATE'],
+    );
+  }
+
+  @override
+  Future<List<DeputyCharacter>> fetchCharacters() async => <DeputyCharacter>[
+    _character('MAIN:7'),
+  ];
+
+  @override
+  Future<DeputyCharacter?> fetchActiveCharacter() async {
+    fetchActiveCharacterCount++;
+    return activeCharacter;
+  }
+
+  @override
+  Future<void> updateActiveCharacter(String characterKey) async {
+    updatedCharacterKey = characterKey;
+    activeCharacter = _character(characterKey);
+  }
+
+  @override
+  Future<List<DeputyAccount>> fetchAccounts() async => const <DeputyAccount>[];
+
+  @override
+  Future<void> createAccount({
+    required String username,
+    required String password,
+    required String nickname,
+  }) async {}
+
+  @override
+  Future<void> resetPassword(int accountId, String password) async {}
+
+  @override
+  Future<void> setActive(int accountId, bool isActive) async {}
+}
+
+class _FakeSessionMetadataStorage implements SessionMetadataStorage {
+  Session? value;
+
+  @override
+  Future<Session?> read() async => value;
+
+  @override
+  Future<void> write(Session session, {required bool persist}) async {
+    value = persist ? session : null;
+  }
+
+  @override
+  Future<void> clear() async => value = null;
 }

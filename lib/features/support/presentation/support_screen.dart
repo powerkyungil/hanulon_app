@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../../app/theme/app_spacing.dart';
 import '../../../app/theme/app_text_styles.dart';
 import '../../../app/theme/app_theme_palette.dart';
 import '../../../core/network/api_exception.dart';
+import '../../../core/permissions/deputy_permission.dart';
 import '../../../core/permissions/role_guard.dart';
 import '../../../core/widgets/app_card.dart';
 import '../../../core/widgets/confirm_dialog.dart';
@@ -36,7 +38,7 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
   Widget build(BuildContext context) {
     final state = ref.watch(supportOverviewProvider);
     final session = ref.watch(authControllerProvider).value;
-    final currentUserId = session?.userId ?? 0;
+    final currentUserId = session?.effectiveUserId ?? session?.userId ?? 0;
     final canManageAll = RoleGuard.canManageSupport(
       session?.role ?? UserRole.unknown,
     );
@@ -61,8 +63,17 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
       body: state.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (error, _) => ErrorView(
-          message: _messageFor(error),
-          onRetry: () => ref.invalidate(supportOverviewProvider),
+          title: isDeputyFeatureForbidden(error) ? '권한 안내' : '문제가 발생했어요',
+          message: deputyPermissionMessage(error),
+          onRetry: isDeputyCharacterRequired(error)
+              ? () => context.go('/deputy/characters')
+              : isDeputyFeatureForbidden(error)
+              ? null
+              : () => ref.invalidate(supportOverviewProvider),
+          actionLabel: isDeputyCharacterRequired(error) ? '캐릭터 선택' : null,
+          onAction: isDeputyCharacterRequired(error)
+              ? () => context.go('/deputy/characters')
+              : null,
         ),
         data: (overview) => _buildBody(
           overview,
@@ -332,7 +343,12 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
     try {
       await action();
     } catch (error) {
-      if (mounted) _showMessage(_messageFor(error), isError: true);
+      if (!mounted) return;
+      if (isDeputyCharacterRequired(error)) {
+        context.go('/deputy/characters');
+        return;
+      }
+      _showMessage(_messageFor(error), isError: true);
     } finally {
       if (mounted) setState(() => _busyActions.remove(key));
     }
@@ -349,7 +365,7 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
   }
 
   static String _messageFor(Object error) {
-    if (error is ApiException) return error.message;
+    if (error is ApiException) return deputyPermissionMessage(error);
     if (error is SupportValidationException) return error.message;
     return '손지원 요청을 처리하지 못했습니다.';
   }

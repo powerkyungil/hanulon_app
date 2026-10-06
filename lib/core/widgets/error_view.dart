@@ -9,12 +9,16 @@ class ErrorView extends StatelessWidget {
     this.title = '문제가 발생했어요',
     required this.message,
     this.onRetry,
+    this.actionLabel,
+    this.onAction,
     super.key,
   });
 
   final String title;
   final String message;
   final VoidCallback? onRetry;
+  final String? actionLabel;
+  final VoidCallback? onAction;
 
   @override
   Widget build(BuildContext context) {
@@ -42,6 +46,14 @@ class ErrorView extends StatelessWidget {
                 label: '다시 시도',
                 variant: AppButtonVariant.secondary,
                 onPressed: onRetry,
+              ),
+            ],
+            if (actionLabel != null && onAction != null) ...<Widget>[
+              if (onRetry != null) const SizedBox(height: AppSpacing.space2),
+              AppButton(
+                label: actionLabel!,
+                variant: AppButtonVariant.text,
+                onPressed: onAction,
               ),
             ],
           ],

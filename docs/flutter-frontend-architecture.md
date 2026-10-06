@@ -41,23 +41,26 @@
 
 ### 2.1 역할 모델
 
-백엔드의 역할 값은 현재 `MASTER`, `ADMIN`, `MEMBER`를 사용한다.
+일반 회원의 백엔드 역할 값은 `MASTER`, `ADMIN`, `MEMBER`를 사용한다. 부주는 일반 회원 역할을 추가하는 대신 별도 인증 principal로 관리한다.
 
 | 역할 | 표시명 | 기본 권한 |
 | --- | --- | --- |
 | `MASTER` | 길드장 | 전체 운영, 길드원 역할·삭제·위임, 컬렉션 전체 수정, 길드 설정의 마스터 항목 수정 |
 | `ADMIN` | 운영진 | 일정·투표·공지·컬렉션·그룹·공성전 등 운영 기능 관리 |
 | `MEMBER` | 길드원 | 일정 조회·등록·컷·멍·개별 삭제, 투표 참여, 본인 정보·본인 상태 수정, 공개 현황 조회 |
+| `DEPUTY` | 부주 계정 | 길드 공용 별도 계정. 선택 캐릭터로 보스 일정 참여·투표, 손지원 매칭, 콘텐츠 그룹 조회만 가능 |
 
 화면에서 버튼을 숨기는 것은 UX 처리일 뿐 보안 경계가 아니다. 모든 생성·수정·삭제·역할 변경은 백엔드에서 다시 권한을 검사해야 한다.
 
 ### 2.2 기존 스레드에서 이어받은 결정
 
-- 보스 투표 이력은 현재 일정 테이블과 분리된 immutable event history로 보존한다.
-- 투표의 `참여마감`과 `삭제`는 서로 다른 동작으로 취급한다. 마감은 참여자를 보존하고, 삭제는 참여자·이력을 제거한다.
+- 보스 투표 occurrence는 일정 테이블과 분리해 관리한다. 일정 삭제·초기화·시간 변경은 기존 voteKey, 투표 상태, 참여 기록을 유지한다.
+- 투표의 참여마감과 직접 삭제는 별도 동작이다. 마감은 참여자를 보존하며, 직접 삭제는 ADMIN/MASTER가 정확한 voteKey를 지정했을 때만 해당 투표와 참여 기록을 제거한다.
 - 보스 참여 이력의 기본 보존 기간은 출현 시각 기준 90일이다.
 - 컬렉션은 이름 기반 V1보다 고정 `collectionItemId` 기반 V2를 우선 사용한다.
 - OCR 결과는 자동 저장하지 않고, 사용자가 보스명과 시각을 확인한 뒤 일정으로 등록한다.
+- 같은 길드원은 별도 위임 등록 없이 다른 회원의 본캐·부캐를 대신 투표할 수 있다. 투표 응답은 투표 대상 캐릭터와 실제 행위자를 분리해 표시한다.
+- 부주 계정은 특정 캐릭터에 종속되지 않는다. 기능 이용 전 같은 길드의 활성 캐릭터 하나를 선택하며, 선택 캐릭터 소유자의 운영진 권한을 상속하지 않는다.
 
 ## 3. 아키텍처 방향
 
@@ -254,6 +257,14 @@ flowchart TD
 - 401, 네트워크 단절, 서버 오류를 구분해 메시지 표시
 - 비밀번호는 로그·분석 이벤트에 남기지 않음
 
+#### 부주 계정 로그인
+
+- 일반 회원 로그인과 분리된 `POST /api/v1/deputy-auth/login`을 사용한다.
+- 로그인 후 같은 길드의 활성 본캐·부캐 목록에서 현재 사용할 캐릭터를 선택한다. 계정 설정에서 언제든 선택을 바꿀 수 있다.
+- 캐릭터 선택 전에는 일정·투표·손지원·콘텐츠 기능으로 이동하지 않고 선택 화면을 유지한다.
+- 부주 계정은 서버에서 허용한 기능만 노출하며, 캐릭터가 바뀌면 현재 대상 기준으로 참여 상태를 다시 조회한다.
+- 운영진은 부주 계정을 생성하고, 비밀번호를 재설정하거나 계정을 비활성화할 수 있다. 비밀번호 재설정·활성 상태 변경 뒤에는 기존 부주 세션을 다시 로그인시킨다.
+
 #### 회원가입 화면
 
 - 로그인 화면에서 회원가입으로 진입할 수 있으며, `기존 길드 가입`과 `새 길드 생성`을 선택한다.
@@ -358,7 +369,7 @@ flowchart TD
   `{boss, spawnTime, type, region, isBlessed}`를 전송하며, `spawnTime`은 서울 기준
   epoch milliseconds다.
 - 참여 마감: 참여자는 유지하고 추가 참여만 차단
-- 투표 항목 삭제: 투표 참여자·이력을 삭제하는 destructive action
+- 투표 항목 직접 삭제: ADMIN/MASTER만 가능하며 `DELETE /api/v1/boss-votes/:voteKey`를 호출한다. 성공 응답은 `204 No Content`이며 해당 투표와 연결된 참여 기록만 삭제한다.
 - 참여 통계에서 특정 참여자 제거
 - 날짜별·월별 통계
 - 기간 내 길드원별 참여 횟수·미참여 횟수·참여율
@@ -450,6 +461,8 @@ Flutter 1차 구현은 기존 V1이 아닌 안정적인 V2 API를 사용한다.
 - 모바일 그룹 카드는 최대 4명만 미리 표시하고 전체 명단은 지연 생성 상세 sheet에서 조회해 50명 이상에서도 카드 높이를 제한한다.
 - 그룹 이동은 영향을 받는 원본·대상 그룹만 저장하고 일부 저장 실패 시 이전 멤버 ID 목록으로 보상 요청한 뒤 로컬 상태를 복구한다.
 - legacy API 응답의 `memberIds` 배열 또는 쉼표 문자열을 repository에서 `List<int>`로 정규화한다.
+- 그룹 화면의 회원 표시는 `GET /api/v1/content-groups/roster`를 사용한다. 응답은 `id`, `nickname`, `occupation`, `mainClass`, `combatPower`만 포함하며 전체 프로필 API(`/api/v1/members`)를 콘텐츠 조회 목적으로 호출하지 않는다.
+- 부주도 그룹과 roster를 조회할 수 있지만 그룹 생성·수정·삭제 및 편성 변경 API는 호출할 수 없고, 백엔드도 이를 거부한다.
 
 화면 폭이 좁은 기기에서는 `그룹`과 `미편성`을 탭으로 나누고, 태블릿에서는 미편성 길드원과 그룹을 좌우 패널로 함께 표시한다.
 
@@ -533,8 +546,9 @@ Flutter 1차 구현은 기존 V1이 아닌 안정적인 V2 API를 사용한다.
 | 보스 정의 | `GET /api/custom-bosses`, `POST /api/custom-bosses`, `POST /api/custom-bosses/reorder`, `DELETE /api/custom-bosses/:id` |
 | 보스 일정 | `GET/POST /api/schedules`, `DELETE /api/schedules/:id`, `DELETE /api/schedules-all`, `POST /api/schedules/cut`, `POST /api/schedules/mung` |
 | OCR | `GET /api/ocr/templates`, `POST /api/ocr/boss-schedule` |
-| 일정 참여 | `GET/PUT /api/v1/participation-targets` (`bossDefinitionIds`), `GET /api/participants`, `GET /api/participation-states`, `POST /api/participants/:boss` |
-| 보스 투표 | `GET /api/vote-bosses`, `POST /api/vote-bosses/manual`, `POST/DELETE /api/vote-bosses/:voteKey`, `DELETE /api/vote-bosses/:voteKey/permanent` |
+| 일정 참여 | `GET/PUT /api/v1/participation-targets` (`bossDefinitionIds`), `GET /api/participants`, `GET /api/participation-states`, `POST /api/participants/:boss` (대상 지정 시 `characterKey`) |
+| 보스 투표 | `GET /api/v1/boss-votes?characterKey=...`, `POST /api/v1/boss-votes/manual`, `PUT /api/v1/boss-votes/:voteKey/participation` (선택적 `characterKey`), `DELETE /api/v1/boss-votes/:voteKey` |
+| 부주 계정 | `POST /api/v1/deputy-auth/login`, `/api/v1/deputy-accounts`, `/api/v1/deputy/characters`, `/api/v1/deputy/active-character` |
 | 투표 통계 | `GET /api/vote-stats`, `GET /api/vote-member-rates`, `POST /api/vote-participants/:voteKey`, `DELETE /api/vote-participants/:voteKey/users/:userId` |
 | 공지 | `/api/notices/rules`, `/api/notices/price-guides`, `/api/notices/prices`, `/api/notices/boss-controls` |
 | 손지원 | `/api/support-requests`, `/api/support-requests/:id/status`, `/api/support-requests/:id/applications`, `/api/support-requests/:requestId/applications/:applicationId`, `/api/support-requests/:requestId/select/:applicationId` |
@@ -542,6 +556,14 @@ Flutter 1차 구현은 기존 V1이 아닌 안정적인 V2 API를 사용한다.
 | 그룹 | `/api/groups`, `/api/groups/:id/members` |
 | 공성전 | `/api/siege`, `/api/siege/me`, `/api/admin/siege/:id`, `/api/siege/all` |
 | 푸시 알림 | `PUT/DELETE /api/v1/push-tokens` |
+
+#### 부주·대리 투표 계약
+
+- 길드원 캐릭터 키는 `MAIN:<userId>` 또는 `ALTERNATE:<userId>`다. 일반 회원은 보스 투표 조회의 `characterKey` query와 참여 body의 `characterKey`로 같은 길드 캐릭터를 지정할 수 있다. 생략하면 본캐이며 서버가 길드와 활성 캐릭터 여부를 검증한다.
+- 부주 계정 로그인 응답에는 `token`, `activeCharacter`, `permissions`가 포함된다. 캐릭터 선택 목록은 `GET /api/v1/deputy/characters`, 현재 선택 조회는 `GET /api/v1/deputy/active-character`, 변경은 `PUT /api/v1/deputy/active-character`에 `{ "characterKey": "MAIN:123" }`을 보낸다.
+- 운영진의 부주 계정 관리는 `GET/POST /api/v1/deputy-accounts`, 비밀번호 재설정은 `PUT /api/v1/deputy-accounts/:id/password`, 활성 상태 변경은 `PUT /api/v1/deputy-accounts/:id/active`를 사용한다.
+- `boss-votes` 참여자에서 대리 투표는 `votedBy`의 계정 종류·ID·닉네임으로 실제 행위자를 표시한다. 대상 캐릭터 이름과 행위자 이름은 서로 다른 필드로 UI에 나타낸다.
+- `characterKey`를 이용한 일반 회원 대리 투표에는 사전 위임 등록이 필요하지 않다. 부주 principal은 서버에서 선택한 캐릭터만 사용할 수 있으며 허용되지 않은 API는 화면 노출 여부와 관계없이 거절된다.
 
 고정 가입 코드 계약은 다음을 기준으로 한다.
 
@@ -558,6 +580,20 @@ Flutter 1차 구현은 기존 V1이 아닌 안정적인 V2 API를 사용한다.
 - 위임은 기존 `MASTER`를 `MEMBER`로 내리고 대상자를 `MASTER`로 올리는 단일 transaction이어야 하며, 성공 응답은 204 또는 빈 200을 사용한다.
 
 현재 API를 그대로 사용할 경우 `ApiPaths`에 경로를 한 곳에서 관리한다. 백엔드가 준비되면 `/api/v1` 버전 경로로 이전하되, 화면·도메인 계층은 변경하지 않도록 repository만 교체한다.
+
+### 보스 일정과 투표 동기화 계약
+
+- 일정 저장에서 출현 시각이 바뀌면 이전 voteKey·상태·참여 기록을 보존하고 새 시각에 별도 occurrence를 만든다. 같은 시각 재등록은 기존 occurrence를 재사용한다.
+- 단일 일정 삭제와 전체 초기화는 현재 일정 데이터만 제거한다. 투표 이력은 목록·통계·참여율에서 계속 조회할 수 있으며 컷·멍도 이전 투표를 유지한다.
+- 정정 대상 시각에 기존 투표가 있으면 해당 occurrence를 다시 사용하고 참여자나 상태를 다른 voteKey로 옮기지 않는다.
+- 보스 정의 초기화 후에도 참여 대상과 투표 이력은 안정적인 보스 식별 키로 보존한다.
+- 일정 변경 성공 후 기존 schedule controller의 투표 provider 무효화로 재조회한다. 프론트에서 보스명이나 가까운 출현 시각을 기준으로 별도 중복 제거하지 않는다. 시간은 epoch milliseconds, 날짜는 Asia/Seoul 기준을 유지한다.
+- 기존 중복 이력은 변경 원인을 추정해 자동 정리하지 않는다. 이번 동기화 정책은 적용 이후의 일정 변경부터 사용한다.
+
+#### 보스 투표 직접 삭제 계약
+
+- 일정 투표는 `type|region|boss|spawnTime`, 수동 투표는 `manual|<id>`인 정확한 voteKey로 식별한다. 요청 body는 없고 성공 응답은 204 No Content다.
+- 권한 없는 사용자는 403, 현재 길드에서 찾을 수 없는 투표는 404를 받는다. 기존 legacy `DELETE /api/vote-bosses/:voteKey`는 투표 마감 동작으로 유지한다.
 
 ### 6.3 Android FCM 기기 토큰 계약
 
@@ -747,6 +783,18 @@ SiegeStatus
 | 가입 코드 관리 | O | X | X |
 
 일정 입력·컷·멍·개별 삭제는 활성 길드원 전체에 허용하고, 전체 초기화와 보스 정의·참여 대상 관리는 `MASTER`·`ADMIN`으로 제한한다.
+
+부주 계정에는 기존 역할을 승계시키지 않고 다음 범위만 허용한다.
+
+| 부주 기능 | 허용 범위 |
+| --- | --- |
+| 보스 일정 | 조회 및 참여 토글만 가능. 일정 등록·컷·멍·삭제·초기화·참여 대상 설정은 불가 |
+| 보스 참여 투표 | 조회 및 선택 캐릭터 참여/취소만 가능. 수동 투표·마감·삭제·통계·참여자 수동 제외는 불가 |
+| 손지원 매칭 | 요청·신청·선택 캐릭터 소유 요청의 상태 변경·삭제 가능. 운영진 권한은 승계하지 않음 |
+| 콘텐츠 참여 | 그룹·편성 조회만 가능. 그룹 및 편성 변경은 불가 |
+| 그 밖의 기능 | 접근 불가 |
+
+부주 계정이 사용할 캐릭터는 길드 내 활성 본캐·부캐 중 하나를 선택한다. 선택 변경은 해당 부주 계정에만 적용되며 다른 부주 계정이나 본주 계정의 선택 상태를 바꾸지 않는다.
 
 ## 9. 백엔드 분리 전 선행 보완 사항
 

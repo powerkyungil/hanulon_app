@@ -66,6 +66,51 @@ void main() {
     expect(member.alternateCharacter?.mainClass, '바드');
   });
 
+  test('콘텐츠 참여 명단 API는 최소 프로필 필드만 사용한다', () async {
+    late RequestOptions request;
+    final client = ApiClient(
+      baseUrl: 'https://example.test',
+      tokenStorage: _FakeTokenStorage(),
+    );
+    client.raw.interceptors.add(
+      InterceptorsWrapper(
+        onRequest: (options, handler) {
+          request = options;
+          handler.resolve(
+            Response<Object?>(
+              requestOptions: options,
+              statusCode: 200,
+              data: <String, dynamic>{
+                'data': <Map<String, dynamic>>[
+                  <String, dynamic>{
+                    'id': 7,
+                    'nickname': '프레이야',
+                    'occupation': '소서리스',
+                    'mainClass': '아크 메이지',
+                    'combatPower': 142530,
+                  },
+                ],
+              },
+            ),
+          );
+        },
+      ),
+    );
+
+    final member = (await ApiMemberRepository(
+      client,
+    ).fetchContentGroupRoster()).single;
+
+    expect(request.method, 'GET');
+    expect(request.path, '/api/v1/content-groups/roster');
+    expect(member.id, 7);
+    expect(member.nickname, '프레이야');
+    expect(member.characterSummary, '소서리스 · 아크 메이지');
+    expect(member.combatPower, 142530);
+    expect(member.equipment.values.every((item) => item.isEmpty), isTrue);
+    expect(member.alternateCharacters, isEmpty);
+  });
+
   test('원본 users API의 JSON 문자열 장비와 스킬을 구조화한다', () async {
     final client = ApiClient(
       baseUrl: 'https://example.test',
