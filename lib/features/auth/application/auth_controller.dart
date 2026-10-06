@@ -46,10 +46,11 @@ class AuthController extends AsyncNotifier<Session?> {
       var restoredSession = session;
       if (session.isDeputy) {
         try {
-          final activeCharacter = await ref
-              .read(deputyAuthRepositoryProvider)
-              .fetchActiveCharacter();
+          final deputyRepository = ref.read(deputyAuthRepositoryProvider);
+          final nickname = await deputyRepository.fetchNickname();
+          final activeCharacter = await deputyRepository.fetchActiveCharacter();
           restoredSession = session.copyWith(
+            nickname: nickname,
             activeCharacter: activeCharacter,
             clearActiveCharacter: activeCharacter == null,
           );
@@ -269,6 +270,19 @@ class AuthController extends AsyncNotifier<Session?> {
     state = AsyncData<Session?>(updated);
     await _writeSessionMetadata(updated);
     return activeCharacter;
+  }
+
+  Future<void> updateDeputyNickname(String nickname) async {
+    final currentSession = state.value;
+    if (currentSession == null || !currentSession.isDeputy) {
+      throw const FormatException('부주 로그인 세션이 없습니다.');
+    }
+    final updatedNickname = await ref
+        .read(deputyAuthRepositoryProvider)
+        .updateNickname(nickname);
+    final updatedSession = currentSession.copyWith(nickname: updatedNickname);
+    state = AsyncData<Session?>(updatedSession);
+    await _writeSessionMetadata(updatedSession);
   }
 
   Future<void> logout() async {

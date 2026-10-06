@@ -6,6 +6,36 @@ import 'package:odin_guild_app/features/auth/domain/user_role.dart';
 import 'package:odin_guild_app/features/deputy/data/deputy_auth_repository.dart';
 
 void main() {
+  test('부주 프로필 조회와 닉네임 변경 API 응답을 처리한다', () async {
+    final requests = <RequestOptions>[];
+    final client = _client((options, handler) {
+      requests.add(options);
+      handler.resolve(
+        Response<Object?>(
+          requestOptions: options,
+          statusCode: 200,
+          data: <String, dynamic>{
+            'data': <String, dynamic>{
+              'deputyId': 4,
+              'username': 'shared-deputy',
+              'nickname': options.method == 'PUT' ? '새 부주명' : '공용 부주',
+            },
+          },
+        ),
+      );
+    });
+
+    final repository = ApiDeputyAuthRepository(client);
+    expect(await repository.fetchNickname(), '공용 부주');
+    expect(await repository.updateNickname('새 부주명'), '새 부주명');
+    expect(requests.map((request) => request.method), <String>['GET', 'PUT']);
+    expect(
+      requests.every((request) => request.path == '/api/v1/deputy/me'),
+      isTrue,
+    );
+    expect(requests[1].data, <String, String>{'nickname': '새 부주명'});
+  });
+
   test('부주 로그인과 캐릭터 응답을 전용 DTO로 변환한다', () async {
     final client = _client((options, handler) {
       final data = switch (options.path) {

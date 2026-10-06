@@ -124,7 +124,8 @@ void main() {
           },
         );
       final deputyRepository = _FakeDeputyAuthRepository()
-        ..activeCharacter = _character('ALTERNATE:7');
+        ..activeCharacter = _character('ALTERNATE:7')
+        ..nickname = '서버 최신 부주명';
       final container = _createContainer(
         storage,
         _FakeAuthRepository(),
@@ -140,7 +141,38 @@ void main() {
 
       expect(session?.isDeputy, isTrue);
       expect(session?.activeCharacterKey, 'ALTERNATE:7');
+      expect(session?.nickname, '서버 최신 부주명');
+      expect(deputyRepository.fetchNicknameCount, 1);
       expect(deputyRepository.fetchActiveCharacterCount, 1);
+    });
+
+    test('부주 닉네임 변경 후 세션과 저장 메타데이터를 갱신한다', () async {
+      final storage = _FakeTokenStorage();
+      final deputyRepository = _FakeDeputyAuthRepository();
+      final metadataStorage = _FakeSessionMetadataStorage();
+      final container = _createContainer(
+        storage,
+        _FakeAuthRepository(),
+        deputyRepository: deputyRepository,
+        metadataStorage: metadataStorage,
+      );
+      addTearDown(container.dispose);
+      await container.read(authControllerProvider.future);
+
+      await container
+          .read(authControllerProvider.notifier)
+          .loginAsDeputy(
+            username: 'shared-deputy',
+            password: 'password',
+            autoLogin: true,
+          );
+      await container
+          .read(authControllerProvider.notifier)
+          .updateDeputyNickname('새 부주명');
+
+      expect(container.read(authControllerProvider).value?.nickname, '새 부주명');
+      expect(metadataStorage.value?.nickname, '새 부주명');
+      expect(deputyRepository.updatedNickname, '새 부주명');
     });
 
     test('세션 복원 시 JWT의 로그인 아이디를 읽기 전용 표시값으로 사용한다', () async {
@@ -373,6 +405,9 @@ DeputyCharacter _character(String key) {
 class _FakeDeputyAuthRepository implements DeputyAuthRepository {
   DeputyCharacter? activeCharacter;
   String? updatedCharacterKey;
+  String nickname = '공용 부주';
+  String? updatedNickname;
+  int fetchNicknameCount = 0;
   int fetchActiveCharacterCount = 0;
 
   @override
@@ -398,6 +433,19 @@ class _FakeDeputyAuthRepository implements DeputyAuthRepository {
   Future<List<DeputyCharacter>> fetchCharacters() async => <DeputyCharacter>[
     _character('MAIN:7'),
   ];
+
+  @override
+  Future<String> fetchNickname() async {
+    fetchNicknameCount++;
+    return nickname;
+  }
+
+  @override
+  Future<String> updateNickname(String nickname) async {
+    this.nickname = nickname;
+    updatedNickname = nickname;
+    return nickname;
+  }
 
   @override
   Future<DeputyCharacter?> fetchActiveCharacter() async {

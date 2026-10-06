@@ -262,6 +262,7 @@ flowchart TD
 - 일반 회원 로그인과 분리된 `POST /api/v1/deputy-auth/login`을 사용한다.
 - 로그인 후 같은 길드의 활성 본캐·부캐 목록에서 현재 사용할 캐릭터를 선택한다. 계정 설정에서 언제든 선택을 바꿀 수 있다.
 - 캐릭터 선택 전에는 일정·투표·손지원·콘텐츠 기능으로 이동하지 않고 선택 화면을 유지한다.
+- 부주는 캐릭터 선택과 무관하게 본인 길드 표시 닉네임을 변경할 수 있다. 변경 후 앱 세션과 재실행 시 프로필은 서버의 최신 닉네임으로 동기화한다.
 - 부주 계정은 서버에서 허용한 기능만 노출하며, 캐릭터가 바뀌면 현재 대상 기준으로 참여 상태를 다시 조회한다.
 - 운영진은 부주 계정을 생성하고, 비밀번호를 재설정하거나 계정을 비활성화할 수 있다. 비밀번호 재설정·활성 상태 변경 뒤에는 기존 부주 세션을 다시 로그인시킨다.
 
@@ -548,7 +549,7 @@ Flutter 1차 구현은 기존 V1이 아닌 안정적인 V2 API를 사용한다.
 | OCR | `GET /api/ocr/templates`, `POST /api/ocr/boss-schedule` |
 | 일정 참여 | `GET/PUT /api/v1/participation-targets` (`bossDefinitionIds`), `GET /api/participants`, `GET /api/participation-states`, `POST /api/participants/:boss` (대상 지정 시 `characterKey`) |
 | 보스 투표 | `GET /api/v1/boss-votes?characterKey=...`, `POST /api/v1/boss-votes/manual`, `PUT /api/v1/boss-votes/:voteKey/participation` (선택적 `characterKey`), `DELETE /api/v1/boss-votes/:voteKey` |
-| 부주 계정 | `POST /api/v1/deputy-auth/login`, `/api/v1/deputy-accounts`, `/api/v1/deputy/characters`, `/api/v1/deputy/active-character` |
+| 부주 계정 | `POST /api/v1/deputy-auth/login`, `/api/v1/deputy-accounts`, `/api/v1/deputy/me`, `/api/v1/deputy/characters`, `/api/v1/deputy/active-character` |
 | 투표 통계 | `GET /api/vote-stats`, `GET /api/vote-member-rates`, `POST /api/vote-participants/:voteKey`, `DELETE /api/vote-participants/:voteKey/users/:userId` |
 | 공지 | `/api/notices/rules`, `/api/notices/price-guides`, `/api/notices/prices`, `/api/notices/boss-controls` |
 | 손지원 | `/api/support-requests`, `/api/support-requests/:id/status`, `/api/support-requests/:id/applications`, `/api/support-requests/:requestId/applications/:applicationId`, `/api/support-requests/:requestId/select/:applicationId` |
@@ -561,6 +562,7 @@ Flutter 1차 구현은 기존 V1이 아닌 안정적인 V2 API를 사용한다.
 
 - 길드원 캐릭터 키는 `MAIN:<userId>` 또는 `ALTERNATE:<userId>`다. 일반 회원은 보스 투표 조회의 `characterKey` query와 참여 body의 `characterKey`로 같은 길드 캐릭터를 지정할 수 있다. 생략하면 본캐이며 서버가 길드와 활성 캐릭터 여부를 검증한다.
 - 부주 계정 로그인 응답에는 `token`, `activeCharacter`, `permissions`가 포함된다. 캐릭터 선택 목록은 `GET /api/v1/deputy/characters`, 현재 선택 조회는 `GET /api/v1/deputy/active-character`, 변경은 `PUT /api/v1/deputy/active-character`에 `{ "characterKey": "MAIN:123" }`을 보낸다.
+- 부주 본인 프로필은 `GET /api/v1/deputy/me`로 조회하고, `PUT /api/v1/deputy/me`에 `{ "nickname": "새 닉네임" }`을 보내 닉네임을 변경한다. 캐릭터 선택 전에도 허용하며, 변경 뒤 세션 표시와 자동 로그인 복원 시 최신 닉네임을 반영한다.
 - 운영진의 부주 계정 관리는 `GET/POST /api/v1/deputy-accounts`, 비밀번호 재설정은 `PUT /api/v1/deputy-accounts/:id/password`, 활성 상태 변경은 `PUT /api/v1/deputy-accounts/:id/active`를 사용한다.
 - `boss-votes` 참여자에서 대리 투표는 `votedBy`의 계정 종류·ID·닉네임으로 실제 행위자를 표시한다. 대상 캐릭터 이름과 행위자 이름은 서로 다른 필드로 UI에 나타낸다.
 - `characterKey`를 이용한 일반 회원 대리 투표에는 사전 위임 등록이 필요하지 않다. 부주 principal은 서버에서 선택한 캐릭터만 사용할 수 있으며 허용되지 않은 API는 화면 노출 여부와 관계없이 거절된다.
@@ -792,6 +794,7 @@ SiegeStatus
 | 보스 참여 투표 | 조회 및 선택 캐릭터 참여/취소만 가능. 수동 투표·마감·삭제·통계·참여자 수동 제외는 불가 |
 | 손지원 매칭 | 요청·신청·선택 캐릭터 소유 요청의 상태 변경·삭제 가능. 운영진 권한은 승계하지 않음 |
 | 콘텐츠 참여 | 그룹·편성 조회만 가능. 그룹 및 편성 변경은 불가 |
+| 본인 프로필 | 본인 닉네임 조회·변경만 가능. 캐릭터 선택 불필요 |
 | 그 밖의 기능 | 접근 불가 |
 
 부주 계정이 사용할 캐릭터는 길드 내 활성 본캐·부캐 중 하나를 선택한다. 선택 변경은 해당 부주 계정에만 적용되며 다른 부주 계정이나 본주 계정의 선택 상태를 바꾸지 않는다.

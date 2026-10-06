@@ -9,6 +9,7 @@ import '../../../app/theme/app_theme_palette.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../core/permissions/deputy_permission.dart';
 import '../../../core/widgets/app_card.dart';
+import '../../../core/widgets/app_text_field.dart';
 import '../../../core/widgets/empty_view.dart';
 import '../../../core/widgets/error_view.dart';
 import '../../../core/widgets/status_tag.dart';
@@ -37,6 +38,7 @@ class _DeputyCharacterSelectionScreenState
     extends ConsumerState<DeputyCharacterSelectionScreen> {
   String? _busyKey;
   String? _errorMessage;
+  bool _isSavingNickname = false;
 
   @override
   Widget build(BuildContext context) {
@@ -59,6 +61,11 @@ class _DeputyCharacterSelectionScreenState
         automaticallyImplyLeading: session.activeCharacter != null,
         title: const Text('사용할 캐릭터 선택'),
         actions: <Widget>[
+          IconButton(
+            tooltip: '닉네임 변경',
+            onPressed: _isSavingNickname ? null : _editNickname,
+            icon: const Icon(Icons.edit_outlined),
+          ),
           IconButton(
             tooltip: '로그아웃',
             onPressed: _logout,
@@ -170,6 +177,100 @@ class _DeputyCharacterSelectionScreenState
   Future<void> _logout() async {
     await ref.read(authControllerProvider.notifier).logout();
     if (mounted) context.go('/login');
+  }
+
+  Future<void> _editNickname() async {
+    final session = ref.read(authControllerProvider).value;
+    if (session == null || !session.isDeputy) return;
+
+    final controller = TextEditingController(text: session.nickname);
+    final formKey = GlobalKey<FormState>();
+    final nickname = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheetContext) => Padding(
+        padding: EdgeInsets.fromLTRB(
+          AppSpacing.screenHorizontal,
+          AppSpacing.space4,
+          AppSpacing.screenHorizontal,
+          MediaQuery.viewInsetsOf(sheetContext).bottom + AppSpacing.space4,
+        ),
+        child: SafeArea(
+          top: false,
+          child: Form(
+            key: formKey,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                Text('부주 닉네임 변경', style: AppTextStyles.sectionTitle),
+                const SizedBox(height: AppSpacing.space4),
+                AppTextField(
+                  label: '닉네임',
+                  controller: controller,
+                  maxLength: 40,
+                  textInputAction: TextInputAction.done,
+                  validator: (value) =>
+                      value?.trim().isNotEmpty == true ? null : '닉네임을 입력해 주세요.',
+                  onSubmitted: (_) {
+                    if (formKey.currentState?.validate() == true) {
+                      Navigator.of(sheetContext).pop(controller.text.trim());
+                    }
+                  },
+                ),
+                const SizedBox(height: AppSpacing.space5),
+                Row(
+                  children: <Widget>[
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.of(sheetContext).pop(),
+                        child: const Text('취소'),
+                      ),
+                    ),
+                    const SizedBox(width: AppSpacing.space3),
+                    Expanded(
+                      child: FilledButton(
+                        onPressed: () {
+                          if (formKey.currentState?.validate() == true) {
+                            Navigator.of(
+                              sheetContext,
+                            ).pop(controller.text.trim());
+                          }
+                        },
+                        child: const Text('저장'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    controller.dispose();
+    if (nickname == null || !mounted) return;
+
+    setState(() => _isSavingNickname = true);
+    try {
+      await ref
+          .read(authControllerProvider.notifier)
+          .updateDeputyNickname(nickname);
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('부주 닉네임을 변경했어요.')));
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(_messageFor(error))));
+      }
+    } finally {
+      if (mounted) setState(() => _isSavingNickname = false);
+    }
   }
 
   String _messageFor(Object error) {

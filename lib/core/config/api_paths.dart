@@ -8,6 +8,7 @@ abstract final class ApiPaths {
       '/api/v1/deputy-accounts/$id/active';
   static const deputyCharacters = '/api/v1/deputy/characters';
   static const deputyActiveCharacter = '/api/v1/deputy/active-character';
+  static const deputyMe = '/api/v1/deputy/me';
   static const register = '/api/v1/auth/register';
   static const pushTokens = '/api/v1/push-tokens';
   static const me = '/api/users/me';

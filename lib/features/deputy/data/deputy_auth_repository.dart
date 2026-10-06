@@ -12,6 +12,10 @@ abstract interface class DeputyAuthRepository {
 
   Future<List<DeputyCharacter>> fetchCharacters();
 
+  Future<String> fetchNickname();
+
+  Future<String> updateNickname(String nickname);
+
   Future<DeputyCharacter?> fetchActiveCharacter();
 
   Future<void> updateActiveCharacter(String characterKey);
@@ -57,6 +61,23 @@ class ApiDeputyAuthRepository implements DeputyAuthRepository {
           permissions: _permissions(json['permissions']),
         );
       },
+    );
+  }
+
+  @override
+  Future<String> fetchNickname() {
+    return _apiClient.get<String>(
+      ApiPaths.deputyMe,
+      decode: (data) => _requiredString(_mapPayload(data), 'nickname'),
+    );
+  }
+
+  @override
+  Future<String> updateNickname(String nickname) {
+    return _apiClient.put<String>(
+      ApiPaths.deputyMe,
+      data: <String, String>{'nickname': nickname.trim()},
+      decode: (data) => _requiredString(_mapPayload(data), 'nickname'),
     );
   }
 
